@@ -7,6 +7,7 @@
  */
 
 import { isDebugBearRumScriptFrame } from './debugbear-rum';
+import { getSentryBuildMetadata } from './sentry-build-metadata';
 
 type SentryNs = typeof import('@sentry/browser');
 
@@ -58,7 +59,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
   const sentryDsn = import.meta.env.VITE_SENTRY_DSN?.trim();
   return {
     dsn: sentryDsn || undefined,
-    release: `worldmonitor@${__APP_VERSION__}`,
+    ...getSentryBuildMetadata(__APP_VERSION__, __BUILD_HASH__),
     environment: (location.hostname === 'worldmonitor.app' || location.hostname.endsWith('.worldmonitor.app')) ? 'production'
       : location.hostname.includes('vercel.app') ? 'preview'
       : 'development',
@@ -320,6 +321,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
       /Response cannot have a body with the given status/, // Safari: Response constructor with 204/304 + body
       /ClerkJS: Network error/, // Clerk SDK transient network failures on user devices
       /^ClerkJS: Response: needs_(?:first|second)_factor\b/, // Clerk SDK auth-flow branch not yet supported; SDK-internal limitation, not our code — WORLDMONITOR-Q1. Narrow to the observed `needs_*_factor` family so future actionable `ClerkJS: Response: <something>` errors (e.g. misconfigured redirect URI) still surface.
+      /\[clerk\] failed to load/, // Clerk SDK failed to load its own UI chunk from clerk.worldmonitor.app — SDK-internal load failure, not our code (WORLDMONITOR-??: Yandex Browser 26.4).
       /doesn't provide an export named/, // stale cached chunk after deploy references removed export
       /Possible side-effect in debug-evaluate/, // Chrome DevTools internal EvalError
       /ConvexError: CONFLICT/, // Expected OCC rejection on concurrent preference saves
@@ -544,7 +546,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
       // `injected/hook.js` wraps `window.fetch` and the leaked rejection frame
       // surfaces as `Object.apply`, not `window.fetch`.
       if (/^(?:TypeError: )?Failed to fetch$/.test(msg)
-          && frames.some(f => /^(?:chrome|moz|safari(?:-web)?)-extension:\/\//.test(f.filename ?? '') && /^(?:(?:window|Object)\.)?(?:fetch|apply)$/i.test(f.function ?? ''))) {
+          && frames.some(f => /^(?:chrome|moz|safari(?:-web)?)-extension:\/\//.test(f.filename ?? '') && /^(?:(?:.*\.)?window\.|(?:window|Object)\.)?(?:fetch|apply)$/i.test(f.function ?? ''))) {
         return null;
       }
       // Bare `Failed to fetch` surfacing through the DebugBear RUM collector's
@@ -758,6 +760,14 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
           // mirrors the EOF gate above: some engines embed the type in the
           // `value` field (WORLDMONITOR-TY).
           || /^(?:SyntaxError: )?Unexpected token '<'/.test(msg)
+          // Bare `Unexpected token '<keyword>'` with zero captured frames on ancient
+          // Android WebView (Chrome 98) — injected bridge/extension script or a
+          // browser-internal parse failure, not our already-parsed bundle. A genuine
+          // first-party SyntaxError carries a source-mapped .ts frame or an owned
+          // hashed-chunk URL in the message (handled above). The `hasAnyStack`-gated
+          // token gate below misses this zero-frame variant (WORLDMONITOR-??:
+          // Unexpected token 'else' / 'for', 2026-07-18).
+          || /^(?:SyntaxError: )?Unexpected token '(?:else|for)'$/.test(msg)
           // Firefox's wording for a failed `fetch()` — the engine-emitted
           // equivalent of Chrome's bare `Failed to fetch` (above) and Safari's
           // `Load failed`. Surfaces via `onunhandledrejection` with zero captured

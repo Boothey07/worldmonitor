@@ -13,6 +13,7 @@
 // is a fixed allowlist — never a request, user, credential, or header field.
 
 import { bootstrapTierFromPublicRequest } from '../../../api/_bootstrap-public-tier.js';
+import { isBootstrapKvServingTier } from './kv-serve-mode.js';
 
 export { bootstrapTierFromPublicRequest } from '../../../api/_bootstrap-public-tier.js';
 
@@ -66,7 +67,9 @@ function warnDeliveryFailure(failureClass) {
   }));
 }
 
-async function emit(env, event) {
+// Exported so the U-K4 serving path (kv-serve.js) emits through the same Axiom client + delivery-
+// failure dedup; the event_type field distinguishes bootstrap_kv_serve from bootstrap_kv_shadow.
+export async function emit(env, event) {
   const token = env?.AXIOM_API_TOKEN;
   if (!token) {
     warnDeliveryFailure('missing_token');
@@ -129,12 +132,15 @@ async function probeAndEmit(tier, env, cf) {
 
 /**
  * Fire-and-forget KV shadow read for a public-tier bootstrap GET. No-op unless the flag is on,
- * the binding exists, and ctx.waitUntil is available. Never affects the response.
+ * the binding exists, and ctx.waitUntil is available. Once a tier is actively served, its
+ * bootstrap_kv_serve event owns latency/outcome telemetry, so skip the redundant shadow read.
+ * Never affects the response.
  */
 export function maybeShadowKvRead(request, url, env, ctx) {
   if (env?.BOOTSTRAP_KV_SHADOW !== '1' || !env?.BOOTSTRAP_KV || typeof ctx?.waitUntil !== 'function') return;
   const tier = bootstrapTierFromPublicRequest(request, url);
   if (!tier) return;
+  if (isBootstrapKvServingTier(env, tier)) return;
   ctx.waitUntil(probeAndEmit(tier, env, request.cf));
 }
 
