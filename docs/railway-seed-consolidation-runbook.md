@@ -146,7 +146,7 @@ rejects every other host even if a workflow variable is misconfigured.
 | `ingestion-acceptance-production-watchdog` | Watchdog HMAC only; no Railway credential |
 | `ingestion-acceptance-production` | Mutation HMAC, the deploy-scoped `RAILWAY_RECONCILE_DEPLOY_TOKEN_V2`, and project ID |
 | `ingestion-acceptance-production-verification` | Verifier HMAC, read-only Railway Viewer token, project ID, and GitHub read evidence |
-| `ingestion-acceptance-production-breakglass` | Operator HMAC plus the same Viewer-only Railway access; require independent reviewers and prevent self-review |
+| `ingestion-acceptance-production-breakglass` | Operator HMAC plus the same Viewer-only Railway access; required reviewers gate the resolve job |
 
 The ordinary lease-aware mutation and verifier jobs receive only their own
 HMAC roles in their separately protected environments.
@@ -168,6 +168,15 @@ is an inability to deploy. That property is enforced instead by the
 workflow contract tests, so treat any change to those guards as a change to a
 security boundary. Note also that `projectTokenCreate` rejects a CLI session
 with `Not Authorized`; both tokens must be created from the Railway dashboard.
+
+Breakglass approval is **one-person by deliberate choice.** The environment
+requires a reviewer, so `resolve` pauses until a human approves and GitHub
+records who did, but `prevent_self_review` is **off**: the operator who
+dispatches recovery may approve their own run. Turning it on with a single
+reviewer would deadlock the emergency path — the one person able to trigger
+recovery would be forbidden from approving it, exactly when it is needed. Real
+two-person control needs a second named reviewer added first; until then the
+`approver` workflow input stays an audit assertion, not a verified second party.
 
 The protected resolver deliberately repeats the GitHub, convergence, and
 provider-inactivity reads after environment approval; the earlier proof is not
