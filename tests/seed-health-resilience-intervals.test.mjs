@@ -19,9 +19,9 @@ process.env.RESILIENCE_SCHEMA_V2_ENABLED = 'true';
 const { default: handler } = await import('../api/seed-health.js');
 
 const META_KEY = 'seed-meta:resilience:intervals';
-const PROBE_KEY = 'resilience:intervals:v9:US';
+const PROBE_KEY = 'resilience:intervals:v10:US';
 const METHODOLOGY = 'weight-perturbation-sensitivity-v3';
-const SOURCE_VERSION = `resilience-intervals:resilience:intervals:v9:${METHODOLOGY}`;
+const SOURCE_VERSION = `resilience-intervals:resilience:intervals:v10:${METHODOLOGY}`;
 
 function intervalMeta(overrides = {}) {
   return {

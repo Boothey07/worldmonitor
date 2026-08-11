@@ -44,9 +44,13 @@ const RESILIENCE_NOT_APPLICABLE_WHEN_ZERO_COVERAGE_IDS: ReadonlySet<string> = ne
 // construct stays serialized for schema continuity but is not part of the
 // active coverage universe. The parity test below keeps this set synchronized
 // with the server.
-const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE_IDS: ReadonlySet<string> = new Set([
-  'education',
-]);
+//
+// Emptied 2026-08-11 (#6460): `education` was the only member and it is now
+// live, so excluding it here would understate a real coverage gap in the
+// widget's Coverage % while the API reported the true number. Kept as an empty
+// set rather than deleted so the next dimension shipping dark has both halves
+// of the mechanism already in place.
+const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE_IDS: ReadonlySet<string> = new Set([]);
 
 // Mirrors server/worldmonitor/resilience/v1/_shared.ts. Keep this table
 // in sync so the widget Coverage % matches API overallCoverage semantics;

@@ -393,6 +393,26 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
     fetchedAt: 1714694400000,
     recordCount: 200,
   },
+  // #6460: `education` is live, and its scorer fail-closes on the seed-meta
+  // preflight before any per-country read — so both halves are required or
+  // every consumer of this fixture throws ResilienceConfigurationError.
+  //
+  // `fetchedAt` MUST be a live clock, not the fixed past timestamps the other
+  // seed-metas above use. `_standalone-source-thresholds.ts` gives this key an
+  // 11520-minute (8 day) budget, so a hardcoded 2024 instant reads as STALE and
+  // fails the preflight exactly as a dead seeder would.
+  'seed-meta:resilience:education-attainment': {
+    fetchedAt: Date.now(),
+    recordCount: 189,
+  },
+  'resilience:education-attainment:v1': {
+    countries: {
+      NO: { value: 84.6, year: 2024 },  // high-attainment OECD → score ~90
+      US: { value: 92.1, year: 2024 },  // measured production value
+      YE: { value: 12.4, year: 2022 },  // low end of the real distribution
+    },
+    seededAt: '2026-08-11T08:03:25.357Z',
+  },
   'economic:wb-external-debt:v1': {
     countries: {
       NO: { value: 2, year: 2024 },     // 2% GNI — Norway low external debt → score ~87

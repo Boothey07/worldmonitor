@@ -1,5 +1,18 @@
 # Education dimension flag-flip runbook
 
+> **EXECUTED 2026-08-11 (#6460).** The dimension is active: `tier='core'`,
+> `RESILIENCE_EDUCATION_ENABLED` defaults to `true`, cache generations rotated
+> to score `v27` / ranking `v27` / history `v21` / intervals `v10`, and both
+> dark allow-list entries removed. Measured acceptance across 196 countries
+> against production seeds (pillar-combined penalized): Spearman 1.00, max
+> country drift 3.45, worst cohort median shift −1.08, 47/51 Core indicators
+> measurable. The procedure below is retained for rollback and audit context;
+> see the closeout section at the end for what was actually measured.
+>
+> One deviation from the procedure as written, recorded rather than waived: the
+> flip is expressed as a **code default** rather than a production env var. See
+> "Why the default and not an env var" in the closeout.
+
 Operational procedure for activating the `education` dimension of the Country
 Resilience Index — moving `RESILIENCE_EDUCATION_ENABLED` from off (shipped
 default) to on.
@@ -137,13 +150,21 @@ All must be green before flipping:
    **At flip, rotate all numeric generations**: score `v26`→`v27`, ranking
    `v26`→`v27`, history `v20`→`v21`, and intervals `v9`→`v10`. The flip
    changes scores, and mixing pre- and post-flip history points or sensitivity
-   bands would manufacture false trends and stale `rankStable` verdicts. Use
-   this grep, then re-run it against the new values:
+   bands would manufacture false trends and stale `rankStable` verdicts.
+
+   **DONE 2026-08-11** — 39 replacements across 21 code and test files. The grep
+   below now names the CURRENT generation, so a future rotation starts from
+   truth rather than from this flip's already-rotated values:
    ```bash
-   grep -rln "resilience:score:v26\|resilience:ranking:v26\|resilience:history:v20\|resilience:intervals:v9" \
+   grep -rln "resilience:score:v27\|resilience:ranking:v27\|resilience:history:v21\|resilience:intervals:v10" \
      --include='*.mjs' --include='*.ts' --include='*.js' --include='*.mts' \
      --include='*.mdx' --include='*.md' . | grep -v node_modules
    ```
+   Expect hits in the two methodology `.mdx` cache-key tables and their prose.
+   The historical bump-chain paragraph and
+   `docs/solutions/conventions/verification-grep-must-cover-every-file-type-it-claims.md`
+   deliberately retain OLD generations — they are history, not live references,
+   so do not rewrite them.
    **The `.mdx`/`.md` includes are load-bearing — do not drop them.** An earlier
    version of this runbook omitted them, and the v25→v26 rotation consequently
    missed the cache-key table in `docs/zh/methodology/country-resilience-index.mdx`
@@ -233,3 +254,66 @@ prefixes backward — let the new prefix accumulate flag-off scores. The scorer
 returns the empty-data shape regardless of prefix, so rolling back creates a
 second cache migration for no benefit. Capture a rollback snapshot for the
 post-mortem.
+
+## Closeout — 2026-08-11
+
+### Why the default and not an env var
+
+Energy v2 and `financialSystemExposure` both keep a `?? 'false'` code default
+and flip through the production environment. Education could not: it is the
+first dimension whose activation is **CI-coupled to its own flag**. Activation
+must remove `education` from `FLAG_GATED_DARK_DIMENSIONS` and from
+`RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE`, and both removals are only correct
+while the dimension is live. With the flag off,
+`tests/resilience-release-gate.test.mts` fails with *"US education should not
+fall back to zero-coverage placeholder scoring"*, and the coverage-mean removal
+drops the US below the `headlineEligible` 0.65 threshold in production.
+
+Keeping the default at `false` would therefore have required the env var in
+**both** the CI workflow and Vercel, splitting "is education on" across two
+config surfaces that can silently disagree. The default is now `true` and the
+env var is the rollback kill switch — the same rollback story, inverted in which
+direction needs the explicit setting.
+
+### Measured acceptance
+
+Harness: `scripts/dry-run-resilience-education-flip.mjs` (read-only, CI-guarded,
+196 countries against production seeds, one shared read cache across both passes
+so baseline and proposed see byte-identical inputs).
+
+| Gate | Threshold | Measured (pillar-combined) |
+|---|---|---|
+| `gate-1-spearman` | >= 0.85 | 1.00 |
+| `gate-2-country-drift` | <= 15 | 3.45 (VU) |
+| `gate-6-cohort-median` | <= 10 | −1.08 (fragile-states) |
+| `gate-7-matched-pair` | all hold | 0 regressions; `in-vs-za` pre-existing |
+| `gate-9-effective-influence` | >= 80% Core | 92.16% (47/51) |
+
+Education pairs post-flip: `pt-vs-uz` 5.84 (min 3), `es-vs-by` 9.01 (min 3),
+`ch-vs-tm` 28.28 (min 5). Southern-Europe cohort: PT −0.55, ES −0.29, IT −0.29,
+MT −0.43, GR +0.12 — inside the ~1.5-point taste bound.
+
+### Weight fallback: measured, not applied
+
+The pre-agreed fallback (halve 0.5 → 0.25 if any gate fails) was **measured and
+found not to apply.** The only failing pair, `in-vs-za`, was already below its
+minGap with the flag off (2.54 against min 3) and stayed below it at weight 0.25
+(2.13), because the baseline it walks back toward is itself under the threshold.
+A weight change cannot repair a pre-existing failure. Tracked in #6466, along
+with the reason nothing caught it earlier: `MATCHED_PAIRS` is only
+schema-validated in CI — `tests/resilience-cohort-config.test.mts` never scores
+a country — so live gaps are evaluated solely by manually-run harnesses.
+
+### A trap this runbook did not anticipate
+
+Step 1 says to confirm the seeder is publishing via `seed-meta` freshness. **A
+fresh `seed-meta` key is not proof its Railway producer ran.** This exact key was
+hand-primed by a local run at 05:32:23Z on 2026-08-11 and read as a satisfied
+precondition; the genuine bundle publish came later, at 08:03:25Z. Worse, the
+primed key *suppressed* the real producer, because `_bundle-runner.mjs` skips a
+section when `elapsed < intervalMs * 0.8` — 5.6 days at a 7-day interval.
+
+Prove a publish three ways instead: sibling parity across the bundle's other
+members, `git cat-file -e <runningSha>:scripts/<seeder>.mjs` against the
+service's running commit, and a TTL cross-check that dates the write
+independently of the payload's own claims.

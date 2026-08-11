@@ -42,16 +42,21 @@ function readerFor(countries: Record<string, unknown> | null) {
   };
 }
 
-async function withFlagOn<T>(fn: () => Promise<T>): Promise<T> {
+function withFlag<T>(value: 'true' | 'false', fn: () => Promise<T>): Promise<T> {
   const prior = process.env.RESILIENCE_EDUCATION_ENABLED;
-  process.env.RESILIENCE_EDUCATION_ENABLED = 'true';
-  try {
-    return await fn();
-  } finally {
+  process.env.RESILIENCE_EDUCATION_ENABLED = value;
+  const restore = () => {
     if (prior == null) delete process.env.RESILIENCE_EDUCATION_ENABLED;
     else process.env.RESILIENCE_EDUCATION_ENABLED = prior;
-  }
+  };
+  return fn().finally(restore);
 }
+
+// Both directions are now set EXPLICITLY. Since #6460 the flag defaults to
+// true, so a suite that relied on the ambient default to mean "off" would keep
+// its name and quietly assert the opposite behavior.
+const withFlagOn = <T>(fn: () => Promise<T>) => withFlag('true', fn);
+const withFlagOff = <T>(fn: () => Promise<T>) => withFlag('false', fn);
 
 describe('normalizeEducationAttainment — anchors', () => {
   it('maps the goalposts to the full score range', () => {
@@ -146,9 +151,15 @@ describe('normalizeEducationAttainment — boundary handling', () => {
   });
 });
 
-describe('scoreEducation — flag off', () => {
+describe('scoreEducation — flag off (the rollback path)', () => {
   it('returns the empty-data shape and contributes no weight', async () => {
-    const score = await scoreEducation('US', readerFor({ US: { value: 80, year: 2024 } }));
+    // Explicit `=false` since #6460: the flag now DEFAULTS to true, so this
+    // suite would otherwise silently test the flag-ON path while still being
+    // named "flag off". This is no longer the shipped state — it is the
+    // rollback path documented in the runbook, and it still has to behave.
+    const score = await withFlagOff(() =>
+      scoreEducation('US', readerFor({ US: { value: 80, year: 2024 } })),
+    );
     assert.equal(score.coverage, 0);
     assert.equal(score.observedWeight, 0);
     assert.equal(score.imputedWeight, 0);

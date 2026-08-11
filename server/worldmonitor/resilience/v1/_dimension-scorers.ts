@@ -1608,8 +1608,27 @@ function isFinSysExposureEnabledLocal(): boolean {
 
 const RESILIENCE_EDUCATION_KEY = 'resilience:education-attainment:v1';
 
+// ACTIVATED 2026-08-11 (#6460). The default is `true`, so this PR is the flip
+// rather than a config change that has to land separately.
+//
+// Why the default and not a production env var, unlike energy v2 and
+// financialSystemExposure: education is the first dimension whose activation is
+// CI-COUPLED to its own flag. Activation must remove `education` from
+// `FLAG_GATED_DARK_DIMENSIONS` and `RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE`,
+// and both removals are only CORRECT while the dimension is live — with the
+// flag off, `tests/resilience-release-gate.test.mts` fails ("US education
+// should not fall back to zero-coverage placeholder scoring") and the coverage
+// mean drops the US below the `headlineEligible` 0.65 threshold. A default of
+// `false` would therefore require the env var in BOTH the CI workflow and
+// Vercel, splitting "is education on" across two config surfaces that can
+// silently disagree. Energy v2 had no dark allow-list, so it never hit this.
+//
+// `RESILIENCE_EDUCATION_ENABLED=false` in the production environment remains
+// the rollback kill switch — identical to the previous rollback story, just
+// inverted in which direction needs the explicit setting. See
+// `docs/methodology/education-flag-flip-runbook.md` § Rollback.
 function isEducationEnabledLocal(): boolean {
-  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'false').toLowerCase() === 'true';
+  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'true').toLowerCase() === 'true';
 }
 
 // Certainty ladder for a stale-but-present observation. Attainment of the 25+
@@ -3128,13 +3147,25 @@ export const RESILIENCE_NOT_APPLICABLE_WHEN_ZERO_COVERAGE: ReadonlySet<Resilienc
 // `education` counted, the US happy-path build fell below the threshold and
 // dropped out of the headline ranking entirely.
 //
-// `financialSystemExposure` is deliberately NOT in this set even though it is
-// also dark. Adding it would change the coverage number already published for
-// every country, which is outside this change's scope; the two should be
-// reconciled together when either flag flips.
-export const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE: ReadonlySet<ResilienceDimensionId> = new Set([
-  'education',
-]);
+// RECONCILIATION, decided 2026-08-11 at the education flip (#6460). The prior
+// note here said the two dark dimensions "should be reconciled together when
+// either flag flips". Education has now flipped, and the decision is to leave
+// `financialSystemExposure` OUT rather than fold it in:
+//
+//   - Adding it would change `overallCoverage` for every country, and
+//     `headlineEligible` gates public ranking inclusion on `>= 0.65`. That is a
+//     published-number change for all 196 countries and needs its own
+//     measurement and its own cache-generation reasoning — it cannot ride along
+//     with a different dimension's activation.
+//   - #6459 retuned the construct but deliberately left it dark: "The dimension
+//     stays flag-dark; activation is Phase C and a separate PR." Folding it into
+//     the confidence mean now would half-activate a dimension whose activation
+//     is explicitly still pending.
+//
+// So the set is empty rather than deleted: `education` is gone because it is
+// live, and fin-sys was never in it. The mechanism stays in place for the next
+// dimension that ships dark, and fin-sys joins this decision at its own flip.
+export const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE: ReadonlySet<ResilienceDimensionId> = new Set([]);
 
 export function isFlagDarkDimension(
   dimension: { id: string; coverage: number; observedWeight?: number; imputedWeight?: number },

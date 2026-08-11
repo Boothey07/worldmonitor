@@ -31,6 +31,7 @@ import {
   scoreExternalDebtCoverage,
   scoreSovereignFiscalBuffer,
   isExcludedFromConfidenceMean,
+  RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE,
   type ResilienceSeedReader,
 } from '../server/worldmonitor/resilience/v1/_dimension-scorers.ts';
 
@@ -256,13 +257,31 @@ describe('construct invariants — sovereignFiscalBuffer (saturating transform)'
   });
 });
 
-describe('isExcludedFromConfidenceMean — education dark branch', () => {
-  // Mirrors the NOT_APPLICABLE positive/negative pair above. The negative case
-  // is the one that matters: the discriminator is the TRIPLE zero, not
-  // coverage===0 alone. A country that genuinely carries the construct but has
-  // a data outage must still drag confidence down so an operator notices —
-  // if this branch matched on coverage alone it would silently hide outages.
-  it('excludes the flag-dark triple-zero shape', () => {
+describe('isExcludedFromConfidenceMean — flag-dark branch', () => {
+  // #6460 activated `education`, which was the only member of
+  // RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE. The set is now EMPTY, so the
+  // positive branch of this predicate has no dimension to exercise and every
+  // assertion below would pass trivially — a suite that cannot fail.
+  //
+  // Rather than delete it (which would leave the mechanism untested until the
+  // next dark dimension needs it) or keep vacuous cases that look like
+  // coverage, the suite now pins the CURRENT contract and arms a tripwire: the
+  // emptiness assertion goes red the moment a dimension is added to the set,
+  // which is exactly when a positive case must be restored.
+  it('has an empty flag-dark set, so nothing is excluded on that branch', () => {
+    assert.deepEqual(
+      [...RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE],
+      [],
+      'A dimension was added to RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE. Restore a positive '
+      + 'triple-zero case here for it — the discriminator is the TRIPLE zero, not coverage===0 '
+      + 'alone, and without a member in the set every assertion in this suite passes vacuously.',
+    );
+  });
+
+  it('no longer excludes education now that it is live', () => {
+    // The behavioural change #6460 published: a dimension that used to leave
+    // the confidence mean now counts, so a real education coverage gap shows
+    // up in the user-facing number instead of being silently forgiven.
     assert.equal(
       isExcludedFromConfidenceMean({
         id: 'education',
@@ -270,8 +289,8 @@ describe('isExcludedFromConfidenceMean — education dark branch', () => {
         observedWeight: 0,
         imputedWeight: 0,
       }),
-      true,
-      'flag-dark education must leave the confidence mean',
+      false,
+      'education is activated — its triple-zero shape is an outage now, not a dark construct',
     );
   });
 

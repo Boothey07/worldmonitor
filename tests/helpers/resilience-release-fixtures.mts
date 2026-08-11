@@ -407,6 +407,30 @@ export function buildReleaseGateFixtures(): ReleaseGateFixtureMap {
     ),
     seededAt: '2026-04-04T00:00:00.000Z',
   };
+  // #6460: `education` is live as of the 2026-08-11 activation, so the release
+  // gate's "every dimension carries positive coverage" assertion now applies to
+  // it like any other active dimension. Both halves are required — the scorer
+  // fail-closes on the seed-meta preflight BEFORE it reads the payload, so a
+  // fixture with only the payload surfaces as `source-failure`, not as data.
+  //
+  // Attainment is derived from the same `quality` scale the other synthetic
+  // signals use, so a fixture country's education score tracks its profile
+  // instead of introducing an unrelated ordering. Real-world range for the
+  // series is roughly 1.15 (Niger) to 98.2 (Belarus).
+  fixtures['seed-meta:resilience:education-attainment'] = {
+    status: 'ok',
+    fetchedAt: Date.now(),
+    recordCount: descriptors.length,
+  };
+  fixtures['resilience:education-attainment:v1'] = {
+    countries: Object.fromEntries(
+      descriptors.map(({ code, profile }) => [
+        code,
+        { value: round(clamp(qualityFor(profile) * 0.9 + 5, 2, 98), 1), year: 2024 },
+      ]),
+    ),
+    seededAt: '2026-08-11T08:03:25.357Z',
+  };
   fixtures['economic:national-debt:v1'] = { entries: debtEntries };
   fixtures['economic:bis:credit:v1'] = { entries: bisCreditEntries };
   fixtures['economic:bis:eer:v1'] = { rates: bisExchangeRates };

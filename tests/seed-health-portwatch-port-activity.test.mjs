@@ -23,7 +23,7 @@ const PORTWATCH_CONTENT_BUDGET_MINUTES = 2 * 72 * 60;
 const TEST_NOW = Date.parse('2026-08-03T14:42:58.000Z');
 const DECISION_META_KEY = 'seed-meta:intelligence:china-decision-signals';
 const PREDICTION_META_KEY = 'seed-meta:prediction:markets';
-const RESILIENCE_INTERVAL_PROBE_KEY = 'resilience:intervals:v9:US';
+const RESILIENCE_INTERVAL_PROBE_KEY = 'resilience:intervals:v10:US';
 const RESILIENCE_INTERVAL_METHODOLOGY = 'weight-perturbation-sensitivity-v3';
 
 before(() => {

@@ -565,10 +565,10 @@ CRI 设计为端到端可审计：给定任一时刻的 Redis 快照，读者应
 
 | 键 | 类型 | TTL | 写入方 | 读取方 |
 |---|---|---|---|---|
-| `resilience:score:v26:{countryCode}` | JSON | 6 小时 | `server/worldmonitor/resilience/v1/_shared.ts` 中的 `buildResilienceScore` | `getResilienceScore` 处理器 |
-| `resilience:ranking:v26` | JSON | 12 小时 | `getResilienceRanking` 暖路径，仅当至少 90% 国家已评分时（`RANKING_CACHE_MIN_COVERAGE = 0.90`） | `getResilienceRanking` 处理器 |
-| `resilience:history:v20:{countryCode}` | 有序集合 | 无限期，修剪至 30 天 | 评分期间 `appendHistory` | 趋势和 `change30d` 计算 |
-| `resilience:intervals:v9:{countryCode}` | JSON | 7 天；通过 `seed-meta`/健康频率监控新鲜度 | `scripts/seed-resilience-scores.mjs` | `getResilienceScore`（可选 `scoreInterval` 字段）和 `getResilienceRanking`（`rankStable`） |
+| `resilience:score:v27:{countryCode}` | JSON | 6 小时 | `server/worldmonitor/resilience/v1/_shared.ts` 中的 `buildResilienceScore` | `getResilienceScore` 处理器 |
+| `resilience:ranking:v27` | JSON | 12 小时 | `getResilienceRanking` 暖路径，仅当至少 90% 国家已评分时（`RANKING_CACHE_MIN_COVERAGE = 0.90`） | `getResilienceRanking` 处理器 |
+| `resilience:history:v21:{countryCode}` | 有序集合 | 无限期，修剪至 30 天 | 评分期间 `appendHistory` | 趋势和 `change30d` 计算 |
+| `resilience:intervals:v10:{countryCode}` | JSON | 7 天；通过 `seed-meta`/健康频率监控新鲜度 | `scripts/seed-resilience-scores.mjs` | `getResilienceScore`（可选 `scoreInterval` 字段）和 `getResilienceRanking`（`rankStable`） |
 | `seed-meta:resilience:static` | JSON | 400 天 | 每次成功种子运行结束时的 `scripts/seed-resilience-static.mjs` | 评分器用于 `dataVersion` 填充、健康检查 |
 | `resilience:static:{countryCode}` | JSON | 400 天 | `scripts/seed-resilience-static.mjs` | 评分器用于所有基线信号（WGI、WHO、FAO、GPI、RSF 等） |
 | `resilience:static:index:v1` | JSON | 400 天 | `scripts/seed-resilience-static.mjs` | 枚举国家的预热路径 |
@@ -606,7 +606,7 @@ CRI 设计为端到端可审计：给定任一时刻的 Redis 快照，读者应
 4. **标题合格门（PR #3469，§U7）。** 国家仅在 `overallCoverage >= 0.65 AND (populationMillions >= 0.2 OR overallCoverage >= 0.85) AND !lowConfidence` 时 `headlineEligible: true`。不合格国家出现在 `greyedOut[]` 中（仍通过原始 API 为需要它们的分析师提供）但从公共排名中排除。这是端到端解决膨胀缺陷的单一变更：之前膨胀的 PW、NR、AD、FM、KI、GD、GQ、ER 队列现在由标题合格门路由，而非被描述为标题排名的一部分。
 5. **缓存命中路径的对称门过滤（PR #3472、#3477，§U7 后续）。** 门必须在每个返回排名的代码路径上为单一真值来源，包括命中缓存的读取时路径。PR #3472 将门接入缓存命中分支（重计算路径已正确过滤）；PR #3477 使其双向（缓存的 `greyedOut[]` 条目带 `headlineEligible: true` 在读取时提升到 `items[]`）并在提升后重新排序，使高分提升项落在正确排名位置，而非追加在末尾。
 
-**缓存前缀升级。** `resilience:score:v15:` → `:v16:` → `:v17:` → `:v18:` → `:v19:` → `:v20:` → `:v21:` → `:v22:` → `:v23:` → `:v24:` → `:v25:`；`resilience:ranking:v15` → `v16` → `v17` → `v18` → `v19` → `v20` → `v21` → `v22` → `v23` → `v24` → `v25`；`resilience:history:v10:` → `:v11:` → `:v12:` → `:v13:` → `:v14:` → `:v15:` → `:v16:` → `:v17:` → `:v18:` → `:v19:` → `:v20:`。v17 升级随标题合格门（PR #3469）发布，因为 `headlineEligible` 成为必需字段；缓存的 v16 条目省略它，v17 的保守防御默认值为 `headlineEligible: false`（异常缺失 → 降级）以匹配 v17 的"每个合法写入器标记字段"合约。v18 升级随 §U8.1（净进口分母扩展到 `liquidReserveAdequacy`）发布，v19 随 cyberDigital 按快照上限，v20 为陈旧降级推出保留，v21 发布在活跃 `pc` 公式内应用领域设计权重的 P1-1 支柱聚合修复，v22 发布第二轮通胀稳定性和 NaN 安全混合修复，v23 发布进口 HHI 陈旧/缺失来源年确定性降级、P3-8 中断源观测安静语义和 WTO 贸易政策严重性评分器修复（全部批量到同代），v24 发布第五轮 R5-2 / PR #4101 治理 WGI 指标槽语义修复。v25 发布 #4009 cyberDigital 发现日平滑。区间缓存也轮换到 `resilience:intervals:v9:` 使旧敏感度带不与 v25 分数一起提供。
+**缓存前缀升级。** `resilience:score:v15:` → `:v16:` → `:v17:` → `:v18:` → `:v19:` → `:v20:` → `:v21:` → `:v22:` → `:v23:` → `:v24:` → `:v25:`；`resilience:ranking:v15` → `v16` → `v17` → `v18` → `v19` → `v20` → `v21` → `v22` → `v23` → `v24` → `v25`；`resilience:history:v10:` → `:v11:` → `:v12:` → `:v13:` → `:v14:` → `:v15:` → `:v16:` → `:v17:` → `:v18:` → `:v19:` → `:v20:`。v17 升级随标题合格门（PR #3469）发布，因为 `headlineEligible` 成为必需字段；缓存的 v16 条目省略它，v17 的保守防御默认值为 `headlineEligible: false`（异常缺失 → 降级）以匹配 v17 的"每个合法写入器标记字段"合约。v18 升级随 §U8.1（净进口分母扩展到 `liquidReserveAdequacy`）发布，v19 随 cyberDigital 按快照上限，v20 为陈旧降级推出保留，v21 发布在活跃 `pc` 公式内应用领域设计权重的 P1-1 支柱聚合修复，v22 发布第二轮通胀稳定性和 NaN 安全混合修复，v23 发布进口 HHI 陈旧/缺失来源年确定性降级、P3-8 中断源观测安静语义和 WTO 贸易政策严重性评分器修复（全部批量到同代），v24 发布第五轮 R5-2 / PR #4101 治理 WGI 指标槽语义修复。v25 发布 #4009 cyberDigital 发现日平滑。v26 发布标志暗置的 `education` 脚手架，使缓存的评分载荷携带序列化的教育行（#6450）。**v27 发布教育维度的正式启用（#6460）**——此次翻转为社会治理领域增加第五个核心承载维度，使该领域内其他每个维度的门控份额从 1/4 变为 1/5，并改变全部 196 个国家的已发布分数。由于翻转改变分数，`resilience:history:` 同时从 `v20` 轮换到 `v21`，区间缓存从 `v9` 轮换到 `v10`：混合翻转前后的历史点会制造虚假趋势，陈旧的敏感度带会产生过时的 `rankStable` 判定。此前区间缓存已轮换到 `resilience:intervals:v9:` 使旧敏感度带不与 v25 分数一起提供。
 
 **经验锚点（实时 `resilience:ranking:v17`，2026-04-28 捕获，#3477 合并后）：**
 
@@ -738,7 +738,7 @@ v17.1 在评分时将修复扩展到 `liquidReserveAdequacy`（无种子器变�
 4. **重新锚定发布门带**：`tests/resilience-pillar-combine-activation.test.mts` 将高带锚点（NO、CH、DK）锁定在 ≥ 55（vs 6 领域公式的 ≥ 70 下限），低带锚点（YE、SO）在 ≤ 40（vs ≤ 45）。快照测试从每个快照读取 `methodologyFormula` 并应用匹配带。参考版重计算确认带在领域加权支柱聚合后有裕度成立：NO = 74.85（≥ 55 by 19.85 分），YE = 29.20（≤ 40 by 10.80 分）。
 5. **投影和权威快照**：`docs/snapshots/resilience-ranking-pillar-combined-projected-2026-04-21.json` 携带激活前使用的 52 国预览表。`docs/snapshots/resilience-ranking-2026-05-28.json` 携带标志激活后的权威全范围实时捕获；它早于 P1-1 领域加权支柱聚合修复，作为 P1-1 前历史捕获保留，直到生成下一次实时全范围捕获。
 
-回退：设 `RESILIENCE_PILLAR_COMBINE_ENABLED=false`，刷新当前 `resilience:score:v26:*`、`resilience:ranking:v26` 和 `resilience:history:v20:*` 键（或等待 TTL 过期）。6 领域公式与支柱组合在 `_shared.ts` 中并存，回退无需代码变更。
+回退：设 `RESILIENCE_PILLAR_COMBINE_ENABLED=false`，刷新当前 `resilience:score:v27:*`、`resilience:ranking:v27` 和 `resilience:history:v21:*` 键（或等待 TTL 过期）。6 领域公式与支柱组合在 `_shared.ts` 中并存，回退无需代码变更。
 
 ### 评分卡（v2.0 自评）
 
