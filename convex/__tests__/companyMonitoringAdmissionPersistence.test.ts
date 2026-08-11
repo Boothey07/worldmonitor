@@ -1,5 +1,5 @@
 import { convexTest } from "convex-test";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { api, internal } from "../_generated/api";
 import {
   installCompanyMonitoringTestEnvironment,
@@ -135,8 +135,6 @@ async function claimAndFinalize(
 }
 
 describe("Company Monitoring admission decision persistence", () => {
-  beforeEach(() => vi.setSystemTime(NOW));
-
   test("evaluates a direct candidate and appends its immutable provenance", async () => {
     const t = convexTest(schema, modules);
     const candidate = await seedCandidate(t);

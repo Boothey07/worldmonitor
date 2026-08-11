@@ -12,6 +12,12 @@ const DIRECTION_RATIONALE_MAX_LENGTH = 1_000;
 const TITLE_MAX_LENGTH = 160;
 const SUMMARY_MAX_LENGTH = 600;
 const CATEGORY_MAX_LENGTH = 100;
+const ATTRIBUTION_TRUTH_VALUES = Object.freeze(["confirmed", "wrong_company", "uncertain"]);
+const OCCURRENCE_TRUTH_VALUES = Object.freeze(["confirmed", "false", "uncertain"]);
+const MATERIALITY_TRUTH_VALUES = Object.freeze(["material", "not_material", "uncertain"]);
+const DIRECTION_VALUES = Object.freeze(["positive", "negative", "mixed"]);
+const CHANNEL_VALUES = Object.freeze(["financial", "reputation"]);
+const MAGNITUDE_VALUES = Object.freeze(["low", "medium", "high", "critical"]);
 
 export const COMPANY_MONITORING_CLASSIFICATION_SCHEMA_VERSION =
   "cm-classification-schema-v1";
@@ -81,20 +87,20 @@ export const COMPANY_MONITORING_CLASSIFICATION_JSON_SCHEMA = deepFreeze({
     "conflict",
   ],
   properties: {
-    attribution: axisSchema(["confirmed", "wrong_company", "uncertain"]),
-    occurrence: axisSchema(["confirmed", "false", "uncertain"]),
-    materiality: axisSchema(["material", "not_material", "uncertain"]),
-    direction: { type: "string", enum: ["positive", "negative", "mixed"] },
+    attribution: axisSchema(ATTRIBUTION_TRUTH_VALUES),
+    occurrence: axisSchema(OCCURRENCE_TRUTH_VALUES),
+    materiality: axisSchema(MATERIALITY_TRUTH_VALUES),
+    direction: { type: "string", enum: DIRECTION_VALUES },
     channels: {
       type: "array",
       minItems: 1,
       maxItems: 2,
       uniqueItems: true,
-      items: { type: "string", enum: ["financial", "reputation"] },
+      items: { type: "string", enum: CHANNEL_VALUES },
     },
     magnitude: {
       type: "string",
-      enum: ["low", "medium", "high", "critical"],
+      enum: MAGNITUDE_VALUES,
     },
     category: { type: "string", minLength: 1, maxLength: CATEGORY_MAX_LENGTH },
     title: { type: "string", minLength: 1, maxLength: TITLE_MAX_LENGTH },
@@ -206,21 +212,12 @@ export function buildCompanyMonitoringClassificationRequest({ candidate, evidenc
   };
 }
 
-const OUTPUT_KEYS = Object.freeze([
-  "attribution",
-  "category",
-  "channels",
-  "conflict",
-  "direction",
-  "magnitude",
-  "materiality",
-  "negativeRationale",
-  "neutralSummary",
-  "occurrence",
-  "positiveRationale",
-  "title",
-]);
-const AXIS_KEYS = Object.freeze(["confidence", "evidenceIds", "rationale", "truth"]);
+const OUTPUT_KEYS = Object.freeze(
+  Object.keys(COMPANY_MONITORING_CLASSIFICATION_JSON_SCHEMA.properties),
+);
+const AXIS_KEYS = Object.freeze(
+  Object.keys(COMPANY_MONITORING_CLASSIFICATION_JSON_SCHEMA.properties.attribution.properties),
+);
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 
 function isRecord(value) {
@@ -316,28 +313,28 @@ function validateModelOutput(modelOutput, allowedEvidenceIds) {
   if (keyFailure) return { error: keyFailure };
 
   const axisChecks = [
-    [value.attribution, ["confirmed", "wrong_company", "uncertain"]],
-    [value.occurrence, ["confirmed", "false", "uncertain"]],
-    [value.materiality, ["material", "not_material", "uncertain"]],
+    [value.attribution, ATTRIBUTION_TRUTH_VALUES],
+    [value.occurrence, OCCURRENCE_TRUTH_VALUES],
+    [value.materiality, MATERIALITY_TRUTH_VALUES],
   ];
   for (const [axis, truthValues] of axisChecks) {
     const failure = validateAxis(axis, truthValues, allowedEvidenceIds);
     if (failure) return { error: failure };
   }
 
-  if (!["positive", "negative", "mixed"].includes(value.direction)) {
+  if (!DIRECTION_VALUES.includes(value.direction)) {
     return { error: "classification_output_invalid_value" };
   }
   if (!Array.isArray(value.channels) || value.channels.length === 0 || value.channels.length > 2) {
     return { error: "classification_output_invalid_value" };
   }
-  if (value.channels.some((channel) => !["financial", "reputation"].includes(channel))) {
+  if (value.channels.some((channel) => !CHANNEL_VALUES.includes(channel))) {
     return { error: "classification_output_invalid_value" };
   }
   if (new Set(value.channels).size !== value.channels.length) {
     return { error: "classification_output_invalid_value" };
   }
-  if (!["low", "medium", "high", "critical"].includes(value.magnitude)) {
+  if (!MAGNITUDE_VALUES.includes(value.magnitude)) {
     return { error: "classification_output_invalid_value" };
   }
   if (typeof value.conflict !== "boolean") {
@@ -392,16 +389,16 @@ function validateModelOutput(modelOutput, allowedEvidenceIds) {
   };
 }
 
-function queryVersionsFor(candidate, evidence) {
-  return [...new Set(candidateEvidence(candidate, evidence)
+function queryVersionsFor(selectedEvidence) {
+  return [...new Set(selectedEvidence
     .map((row) => row.queryVersion)
     .filter((version) =>
       typeof version === "string" && version.length > 0 && version === version.trim()
     ))].sort();
 }
 
-function evidenceById(candidate, evidence) {
-  return new Map(candidateEvidence(candidate, evidence).map((row) => [
+function evidenceById(selectedEvidence) {
+  return new Map(selectedEvidence.map((row) => [
     row.evidenceFingerprint,
     row,
   ]));
@@ -451,14 +448,14 @@ function nextRetryAt(candidate, now, terminalAt) {
   return terminalAt;
 }
 
-function resultBase({ candidate, evidence, now, modelVersion }) {
+function resultBase({ candidate, selectedEvidence, now, modelVersion }) {
   return {
     ownerAccountId: candidate.ownerAccountId,
     companyId: candidate.companyId,
     occurrenceDedupeKey: candidate.occurrenceDedupeKey,
     decidedAt: now,
     terminalAt: terminalAtFor(candidate),
-    queryVersions: queryVersionsFor(candidate, evidence),
+    queryVersions: queryVersionsFor(selectedEvidence),
     confidenceFloors: COMPANY_MONITORING_DEFAULT_CONFIDENCE_FLOORS,
     versions: {
       classificationSchema: COMPANY_MONITORING_CLASSIFICATION_SCHEMA_VERSION,
@@ -534,8 +531,9 @@ function policyReasons(classification, authority) {
 export function evaluateCompanyMonitoringClassification(input) {
   let base;
   try {
-    base = resultBase(input);
-    const selectedEvidenceById = evidenceById(input.candidate, input.evidence);
+    const selectedEvidence = candidateEvidence(input.candidate, input.evidence);
+    base = resultBase({ ...input, selectedEvidence });
+    const selectedEvidenceById = evidenceById(selectedEvidence);
     const validation = validateModelOutput(
       input.modelOutput,
       new Set(selectedEvidenceById.keys()),

@@ -15,6 +15,7 @@ import {
 import {
   fingerprint,
   hasCurrentCompanyMonitoringClaimPolicy,
+  randomFence,
 } from "./_shared";
 import {
   companyMonitoringFinalizeResultValidator,
@@ -206,12 +207,6 @@ async function requireWorkerSecret(secret: string): Promise<void> {
   if (!expected || !(await timingSafeEqualStrings(secret, expected))) {
     throw new ConvexError("COMPANY_MONITORING_WORKER_UNAUTHORIZED");
   }
-}
-
-function randomFence(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function providerRolloutEnabled(source: Source): boolean {

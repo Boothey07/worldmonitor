@@ -16,7 +16,7 @@ import { COMPANY_MONITORING_LIMITS } from "../../shared/company-monitoring-contr
 import {
   companyMonitoringProviderEvidenceValidator,
 } from "./validators";
-import { fingerprint } from "./_shared";
+import { fingerprint, randomFence } from "./_shared";
 import {
   COMPANY_MONITORING_ADMISSION_POLICY_VERSION,
   COMPANY_MONITORING_CLASSIFICATION_SCHEMA_VERSION,
@@ -37,6 +37,7 @@ const MAX_EXPANDED_EVIDENCE_ROWS = 25 * 25;
 const ADMISSION_LEASE_MS = 5 * 60 * 1000;
 const ADMISSION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const ADMISSION_MODEL_VERSION = /^[^\u0000-\u001f\u007f]{1,200}$/u;
+const CANDIDATE_EVIDENCE_SNAPSHOT_VERSION = "cm-candidate-evidence-snapshot-v1";
 
 type EvidenceDoc = Doc<"companyMonitoringEvidence">;
 
@@ -69,6 +70,27 @@ function evidenceShape(row: EvidenceDoc): NormalizedCompanyEvidence {
     observedAt: row.observedAt,
     ...(row.expiresAt !== undefined ? { expiresAt: row.expiresAt } : {}),
   };
+}
+
+function candidateEvidenceSnapshotDigest(input: {
+  selectionPolicyVersion: string;
+  referenceCount: number;
+  referencesTruncated: boolean;
+  evidence: NormalizedCompanyEvidence[];
+}) {
+  return fingerprint({
+    version: CANDIDATE_EVIDENCE_SNAPSHOT_VERSION,
+    selectionPolicyVersion: input.selectionPolicyVersion,
+    referenceCount: input.referenceCount,
+    referencesTruncated: input.referencesTruncated,
+    references: input.evidence.map((evidence) => ({
+      evidenceFingerprint: evidence.evidenceFingerprint,
+      sourceAuthority: evidence.sourceAuthority,
+      independence: evidence.independence,
+      queryVersion: evidence.queryVersion ?? null,
+      expiresAt: evidence.expiresAt ?? null,
+    })),
+  });
 }
 
 async function canonicalSubjects(
@@ -255,17 +277,11 @@ async function recomputeOccurrenceCandidate(
   if (active.length > 0) {
     const ranked = active.map(evidenceShape).sort(compareCompanyEvidence);
     const selected = ranked.slice(0, COMPANY_MONITORING_EVIDENCE_POLICY.maxReferences);
-    const evidenceSnapshotDigest = await fingerprint({
-      version: "cm-candidate-evidence-snapshot-v1",
+    const evidenceSnapshotDigest = await candidateEvidenceSnapshotDigest({
       selectionPolicyVersion: COMPANY_MONITORING_EVIDENCE_POLICY.version,
       referenceCount: active.length,
       referencesTruncated: active.length > selected.length,
-      references: selected.map((evidence) => ({
-        evidenceFingerprint: evidence.evidenceFingerprint,
-        sourceAuthority: evidence.sourceAuthority,
-        independence: evidence.independence,
-        queryVersion: evidence.queryVersion ?? null,
-      })),
+      evidence: selected,
     });
     const evidenceChanged = existing?.evidenceSnapshotDigest !== evidenceSnapshotDigest;
     const first = [...active].sort((left, right) =>
@@ -274,6 +290,13 @@ async function recomputeOccurrenceCandidate(
     const lifecycle = evidenceChanged && existing?.state === "held"
       ? { state: "pending_classification" as const }
       : candidateLifecycle(existing, now);
+    const lifecycleChanged = Boolean(
+      existing && (
+        existing.state !== lifecycle.state ||
+        (lifecycle.state === "held" && existing.holdUntil !== lifecycle.holdUntil)
+      )
+    );
+    if (existing && !evidenceChanged && !lifecycleChanged) return;
     const row = {
       ownerAccountId,
       companyId,
@@ -329,13 +352,26 @@ async function recomputeOccurrenceCandidate(
     return;
   }
   if (!existing) return;
+  const emptyEvidenceSnapshotDigest = await candidateEvidenceSnapshotDigest({
+    selectionPolicyVersion: existing.selectionPolicyVersion,
+    referenceCount: 0,
+    referencesTruncated: false,
+    evidence: [],
+  });
+  const evidenceAlreadyEmpty =
+    existing.referenceEvidenceFingerprints.length === 0 &&
+    existing.referenceCount === 0 &&
+    !existing.referencesTruncated &&
+    existing.evidenceSnapshotDigest === emptyEvidenceSnapshotDigest;
   if (existing.terminalReason === "admitted" || existing.terminalReason === "rejected") {
+    if (evidenceAlreadyEmpty) return;
     await ctx.db.patch(existing._id, {
       observationBlocking: false,
       referenceEvidenceFingerprints: [],
       referenceCount: 0,
       referencesTruncated: false,
       evidenceRevision: existing.evidenceRevision + 1,
+      evidenceSnapshotDigest: emptyEvidenceSnapshotDigest,
       updatedAt: now,
     });
     return;
@@ -354,18 +390,13 @@ async function recomputeOccurrenceCandidate(
     terminalReason,
     now,
   );
+  if (evidenceAlreadyEmpty) return;
   await ctx.db.patch(existing._id, {
     referenceEvidenceFingerprints: [],
     referenceCount: 0,
     referencesTruncated: false,
     evidenceRevision: existing.evidenceRevision + 1,
-    evidenceSnapshotDigest: await fingerprint({
-      version: "cm-candidate-evidence-snapshot-v1",
-      selectionPolicyVersion: existing.selectionPolicyVersion,
-      referenceCount: 0,
-      referencesTruncated: false,
-      references: [],
-    }),
+    evidenceSnapshotDigest: emptyEvidenceSnapshotDigest,
     updatedAt: now,
   });
 }
@@ -1031,10 +1062,10 @@ function canonicalValue(value: unknown): unknown {
   return value;
 }
 
-function admissionLeaseToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+function admissionTerminalReason(decision: string) {
+  if (decision === "publish") return "admitted" as const;
+  if (decision === "reject") return "rejected" as const;
+  return "hold_expired" as const;
 }
 
 async function referencedEvidence(
@@ -1086,17 +1117,11 @@ async function referencedEvidence(
     }
   }
   const shaped = evidence.map(evidenceShape);
-  const evidenceSnapshotDigest = await fingerprint({
-    version: "cm-candidate-evidence-snapshot-v1",
+  const evidenceSnapshotDigest = await candidateEvidenceSnapshotDigest({
     selectionPolicyVersion: candidate.selectionPolicyVersion,
     referenceCount: candidate.referenceCount,
     referencesTruncated: candidate.referencesTruncated,
-    references: shaped.map((row) => ({
-      evidenceFingerprint: row.evidenceFingerprint,
-      sourceAuthority: row.sourceAuthority,
-      independence: row.independence,
-      queryVersion: row.queryVersion ?? null,
-    })),
+    evidence: shaped,
   });
   if (candidate.evidenceSnapshotDigest !== evidenceSnapshotDigest) {
     throw new ConvexError("COMPANY_MONITORING_ADMISSION_EVIDENCE_STALE");
@@ -1290,7 +1315,7 @@ export async function claimNextAdmissionCandidateHandler(
       await terminalizeSystemDecision(ctx, candidate, "reject", reason, "rejected", now);
       continue;
     }
-    const leaseToken = admissionLeaseToken();
+    const leaseToken = randomFence();
     const leaseExpiresAt = Math.min(candidate.expiresAt, now + ADMISSION_LEASE_MS);
     await ctx.db.patch(candidate._id, {
       classificationWorkerId: workerId,
@@ -1345,10 +1370,6 @@ export async function recordAdmissionDecisionHandler(
   if (!Number.isSafeInteger(args.expectedEvidenceRevision) || args.expectedEvidenceRevision < 1) {
     throw new ConvexError("COMPANY_MONITORING_EVIDENCE_REVISION_INVALID");
   }
-  const submissionDigest = await fingerprint(canonicalValue({
-    modelVersion,
-    modelOutput: args.modelOutput,
-  }));
   const replay = await ctx.db
     .query("companyMonitoringAdmissionDecisions")
     .withIndex("by_replay_fence", (q) =>
@@ -1361,6 +1382,10 @@ export async function recordAdmissionDecisionHandler(
     )
     .unique();
   if (replay) {
+    const submissionDigest = await fingerprint(canonicalValue({
+      modelVersion,
+      modelOutput: args.modelOutput,
+    }));
     if (replay.submissionDigest !== submissionDigest) {
       throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_REPLAY_CONFLICT");
     }
@@ -1401,6 +1426,10 @@ export async function recordAdmissionDecisionHandler(
     );
     return { status: "recorded" as const, decision: "expire" as const };
   }
+  const submissionDigest = await fingerprint(canonicalValue({
+    modelVersion,
+    modelOutput: args.modelOutput,
+  }));
   const evidence = await referencedEvidence(ctx, candidate, now);
   const result = evaluateCompanyMonitoringClassification({
     candidate,
@@ -1485,11 +1514,7 @@ export async function recordAdmissionDecisionHandler(
     await ctx.db.patch(candidate._id, {
       state: "terminal",
       holdUntil: undefined,
-      terminalReason: result.decision === "publish"
-        ? "admitted"
-        : result.decision === "reject"
-          ? "rejected"
-          : "hold_expired",
+      terminalReason: admissionTerminalReason(result.decision),
       observationBlocking: false,
       attemptCount,
       lastAdmissionDecisionId: decisionId,

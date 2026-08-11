@@ -180,6 +180,31 @@ describe("Company Monitoring evidence persistence and candidate lifecycle", () =
     expect((await candidateFor(t, ACCOUNT_B, COMPANY_B))?.referenceCount).toBe(1);
   });
 
+  test("does not revise an unchanged candidate snapshot during provider refresh", async () => {
+    const t = convexTest(schema, modules);
+    await seedCompany(t, ACCOUNT_A, COMPANY_A, "lei:A123");
+    const evidence = exaEvidence(COMPANY_A, "lei:A123");
+    await t.mutation(EVIDENCE.ingestEvidenceForTest, {
+      ownerAccountId: ACCOUNT_A,
+      companyIds: [COMPANY_A],
+      evidence: [evidence],
+    });
+    const original = await candidateFor(t, ACCOUNT_A, COMPANY_A);
+
+    vi.advanceTimersByTime(1_000);
+    await t.mutation(EVIDENCE.ingestEvidenceForTest, {
+      ownerAccountId: ACCOUNT_A,
+      companyIds: [COMPANY_A],
+      evidence: [evidence],
+    });
+
+    expect(await candidateFor(t, ACCOUNT_A, COMPANY_A)).toMatchObject({
+      evidenceRevision: original!.evidenceRevision,
+      evidenceSnapshotDigest: original!.evidenceSnapshotDigest,
+      updatedAt: original!.updatedAt,
+    });
+  });
+
   test("records attempts and holds, then recomputes expiry and restored authority", async () => {
     const t = convexTest(schema, modules);
     await seedCompany(t, ACCOUNT_A, COMPANY_A, "lei:A123");

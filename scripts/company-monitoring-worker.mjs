@@ -389,55 +389,56 @@ export function createCompanyMonitoringWorker(options) {
     }
 
     inFlight = true;
-    let classification;
-    let runId;
     try {
-      classification = await executeAdmission({
-        candidate: claim.candidate,
-        evidence: claim.evidence,
-      });
-      runId = classificationRunId();
-      if (
-        !classification ||
-        typeof classification.modelVersion !== 'string' ||
-        classification.modelVersion.length === 0 ||
-        typeof runId !== 'string' ||
-        runId.length === 0
-      ) {
-        throw new Error('Classifier returned invalid finalization metadata');
+      let classification;
+      let runId;
+      try {
+        classification = await executeAdmission({
+          candidate: claim.candidate,
+          evidence: claim.evidence,
+        });
+        runId = classificationRunId();
+        if (
+          !classification ||
+          typeof classification.modelVersion !== 'string' ||
+          classification.modelVersion.length === 0 ||
+          typeof runId !== 'string' ||
+          runId.length === 0
+        ) {
+          throw new Error('Classifier returned invalid finalization metadata');
+        }
+      } catch {
+        return 'provider_error';
       }
-    } catch {
-      inFlight = false;
-      return 'provider_error';
-    }
 
-    let finalized;
-    try {
-      finalized = await client.mutation(
-        anyApi.companyMonitoring.orchestration.finalizeAdmissionCandidate,
-        {
-          secret,
-          workerId,
-          leaseToken: claim.leaseToken,
-          ownerAccountId: claim.candidate.ownerAccountId,
-          companyId: claim.candidate.companyId,
-          occurrenceDedupeKey: claim.candidate.occurrenceDedupeKey,
-          expectedEvidenceRevision: claim.expectedEvidenceRevision,
-          classificationRunId: runId,
-          modelVersion: classification.modelVersion,
-          modelOutput: classification.modelOutput,
-        },
-      );
-    } catch {
-      inFlight = false;
+      let finalized;
+      try {
+        finalized = await client.mutation(
+          anyApi.companyMonitoring.orchestration.finalizeAdmissionCandidate,
+          {
+            secret,
+            workerId,
+            leaseToken: claim.leaseToken,
+            ownerAccountId: claim.candidate.ownerAccountId,
+            companyId: claim.candidate.companyId,
+            occurrenceDedupeKey: claim.candidate.occurrenceDedupeKey,
+            expectedEvidenceRevision: claim.expectedEvidenceRevision,
+            classificationRunId: runId,
+            modelVersion: classification.modelVersion,
+            modelOutput: classification.modelOutput,
+          },
+        );
+      } catch {
+        return 'finalize_error';
+      }
+
+      if (finalized?.status === 'recorded' || finalized?.status === 'replayed') {
+        return finalized.status;
+      }
       return 'finalize_error';
+    } finally {
+      inFlight = false;
     }
-    inFlight = false;
-
-    if (finalized?.status === 'recorded' || finalized?.status === 'replayed') {
-      return finalized.status;
-    }
-    return 'finalize_error';
   };
 
   const waitForNextPoll = () => new Promise((resolve) => {

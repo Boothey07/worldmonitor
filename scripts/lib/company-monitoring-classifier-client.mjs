@@ -4,7 +4,7 @@ import {
 
 export const COMPANY_MONITORING_CLASSIFIER_ENDPOINT =
   'https://openrouter.ai/api/v1/chat/completions';
-export const COMPANY_MONITORING_CLASSIFIER_DEFAULT_TIMEOUT_MS = 20_000;
+const COMPANY_MONITORING_CLASSIFIER_DEFAULT_TIMEOUT_MS = 20_000;
 export const COMPANY_MONITORING_CLASSIFIER_MAX_TIMEOUT_MS = 60_000;
 
 const OPENROUTER_SITE_URL = 'https://worldmonitor.app';
