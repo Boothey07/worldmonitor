@@ -23,6 +23,7 @@ import {
   COMPANY_MONITORING_DEFAULT_CONFIDENCE_FLOORS,
   COMPANY_MONITORING_RETRY_POLICY,
   COMPANY_MONITORING_SOURCE_POLICY_VERSION,
+  evaluateCompanyMonitoringClassifierTransportFailure,
   evaluateCompanyMonitoringClassification,
 } from "../../scripts/lib/company-monitoring-classification.mjs";
 
@@ -1438,6 +1439,27 @@ export async function recordAdmissionDecisionHandler(
     now,
     modelVersion,
   });
+  return persistAdmissionResult(
+    ctx,
+    candidate,
+    result,
+    evidence,
+    classificationRunId,
+    submissionDigest,
+    now,
+  );
+}
+
+async function persistAdmissionResult(
+  ctx: MutationCtx,
+  candidate: Doc<"companyMonitoringCandidates">,
+  result: ReturnType<typeof evaluateCompanyMonitoringClassification> |
+    ReturnType<typeof evaluateCompanyMonitoringClassifierTransportFailure>,
+  evidence: NormalizedCompanyEvidence[],
+  classificationRunId: string,
+  submissionDigest: string,
+  now: number,
+) {
   const derivedQueryVersions = [...new Set(evidence.map((row) => row.queryVersion!))].sort();
   if (
     result.queryVersions.length !== derivedQueryVersions.length ||
@@ -1527,6 +1549,90 @@ export async function recordAdmissionDecisionHandler(
   return { status: "recorded" as const, decision: result.decision };
 }
 
+export async function recordAdmissionTransportFailureHandler(
+  ctx: MutationCtx,
+  args: {
+    workerId: string;
+    leaseToken: string;
+    ownerAccountId: string;
+    companyId: string;
+    occurrenceDedupeKey: string;
+    expectedEvidenceRevision: number;
+    classificationRunId: string;
+    modelVersion: string;
+  },
+) {
+  const workerId = admissionIdentifier(args.workerId, "ADMISSION_WORKER_ID");
+  const leaseToken = admissionIdentifier(args.leaseToken, "ADMISSION_LEASE");
+  const classificationRunId = admissionIdentifier(
+    args.classificationRunId,
+    "CLASSIFICATION_RUN_ID",
+  );
+  const modelVersion = admissionModelVersion(args.modelVersion);
+  if (!Number.isSafeInteger(args.expectedEvidenceRevision) || args.expectedEvidenceRevision < 1) {
+    throw new ConvexError("COMPANY_MONITORING_EVIDENCE_REVISION_INVALID");
+  }
+  const submissionDigest = await fingerprint(canonicalValue({
+    failure: "classifier_transport_failure",
+    modelVersion,
+  }));
+  const replay = await ctx.db
+    .query("companyMonitoringAdmissionDecisions")
+    .withIndex("by_replay_fence", (q) =>
+      q
+        .eq("ownerAccountId", args.ownerAccountId)
+        .eq("companyId", args.companyId)
+        .eq("occurrenceDedupeKey", args.occurrenceDedupeKey)
+        .eq("evidenceRevision", args.expectedEvidenceRevision)
+        .eq("classificationRunId", classificationRunId),
+    )
+    .unique();
+  if (replay) {
+    if (replay.submissionDigest !== submissionDigest) {
+      throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_REPLAY_CONFLICT");
+    }
+    return { status: "replayed" as const, decision: replay.decision };
+  }
+  const candidate = await ctx.db
+    .query("companyMonitoringCandidates")
+    .withIndex("by_account_company_occurrence", (q) =>
+      q
+        .eq("ownerAccountId", args.ownerAccountId)
+        .eq("companyId", args.companyId)
+        .eq("occurrenceDedupeKey", args.occurrenceDedupeKey),
+    )
+    .unique();
+  const now = Date.now();
+  if (
+    !candidate ||
+    candidate.state !== "pending_classification" ||
+    candidate.evidenceRevision !== args.expectedEvidenceRevision ||
+    candidate.classificationWorkerId !== workerId ||
+    candidate.classificationLeaseToken !== leaseToken ||
+    candidate.classificationLeaseExpiresAt === undefined ||
+    candidate.classificationLeaseExpiresAt <= now ||
+    !await admissionScopeIsActive(ctx, candidate)
+  ) {
+    throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_FENCED");
+  }
+  const evidence = await referencedEvidence(ctx, candidate, now);
+  const result = evaluateCompanyMonitoringClassifierTransportFailure({
+    candidate,
+    evidence,
+    now,
+    modelVersion,
+  });
+  return persistAdmissionResult(
+    ctx,
+    candidate,
+    result,
+    evidence,
+    classificationRunId,
+    submissionDigest,
+    now,
+  );
+}
+
 export const releaseHeldAdmissionCandidate = internalMutation({
   args: {
     ownerAccountId: v.string(),
@@ -1593,4 +1699,18 @@ export const recordAdmissionDecisionForTest = internalMutation({
     modelOutput: v.optional(v.any()),
   },
   handler: recordAdmissionDecisionHandler,
+});
+
+export const recordAdmissionTransportFailureForTest = internalMutation({
+  args: {
+    workerId: v.string(),
+    leaseToken: v.string(),
+    ownerAccountId: v.string(),
+    companyId: v.string(),
+    occurrenceDedupeKey: v.string(),
+    expectedEvidenceRevision: v.number(),
+    classificationRunId: v.string(),
+    modelVersion: v.string(),
+  },
+  handler: recordAdmissionTransportFailureHandler,
 });

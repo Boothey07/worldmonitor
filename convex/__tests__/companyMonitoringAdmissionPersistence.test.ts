@@ -134,6 +134,31 @@ async function claimAndFinalize(
   };
 }
 
+async function claimAndRecordTransportFailure(
+  t: ReturnType<typeof convexTest>,
+  options: { workerId: string; classificationRunId: string },
+) {
+  const claim = await t.mutation(EVIDENCE.claimNextAdmissionCandidateForTest, {
+    workerId: options.workerId,
+  });
+  expect(claim.status).toBe("claimed");
+  const args = {
+    workerId: options.workerId,
+    leaseToken: claim.leaseToken!,
+    ownerAccountId: claim.candidate!.ownerAccountId,
+    companyId: claim.candidate!.companyId,
+    occurrenceDedupeKey: claim.candidate!.occurrenceDedupeKey,
+    expectedEvidenceRevision: claim.expectedEvidenceRevision!,
+    classificationRunId: options.classificationRunId,
+    modelVersion: "openrouter/google/gemini-2.5-flash@2026-08-11",
+  };
+  return {
+    claim,
+    args,
+    result: await t.mutation(EVIDENCE.recordAdmissionTransportFailureForTest, args),
+  };
+}
+
 describe("Company Monitoring admission decision persistence", () => {
   test("evaluates a direct candidate and appends its immutable provenance", async () => {
     const t = convexTest(schema, modules);
@@ -218,6 +243,33 @@ describe("Company Monitoring admission decision persistence", () => {
     }
   });
 
+  test("exposes a targetless service-secret transport-failure finalize seam", async () => {
+    const t = convexTest(schema, modules);
+    await seedCandidate(t);
+    const priorSecret = process.env.COMPANY_MONITORING_WORKER_SECRET;
+    process.env.COMPANY_MONITORING_WORKER_SECRET = "test-admission-worker-secret";
+    try {
+      const claim = await t.mutation(PUBLIC_ORCHESTRATION.claimNextAdmissionCandidate, {
+        secret: "test-admission-worker-secret",
+        workerId: "public-transport-worker-1",
+      });
+      expect(await t.mutation(PUBLIC_ORCHESTRATION.finalizeAdmissionTransportFailure, {
+        secret: "test-admission-worker-secret",
+        workerId: "public-transport-worker-1",
+        leaseToken: claim.leaseToken,
+        ownerAccountId: claim.candidate.ownerAccountId,
+        companyId: claim.candidate.companyId,
+        occurrenceDedupeKey: claim.candidate.occurrenceDedupeKey,
+        expectedEvidenceRevision: claim.expectedEvidenceRevision,
+        classificationRunId: "public-classification-transport-run-1",
+        modelVersion: "provider/classifier-v1@2026-08-11",
+      })).toEqual({ status: "recorded", decision: "hold" });
+    } finally {
+      if (priorSecret === undefined) delete process.env.COMPANY_MONITORING_WORKER_SECRET;
+      else process.env.COMPANY_MONITORING_WORKER_SECRET = priorSecret;
+    }
+  });
+
   test("uses absolute 6h, 24h, 48h checkpoints and expires once by 72h", async () => {
     const t = convexTest(schema, modules);
     await seedCandidate(t);
@@ -259,6 +311,85 @@ describe("Company Monitoring admission decision persistence", () => {
     ]);
     expect(state.decisions.at(-1)).toMatchObject({
       reasonCodes: ["candidate_expired", "materiality_confidence_below_floor"],
+      modelVersion: "openrouter/google/gemini-2.5-flash@2026-08-11",
+      queryVersions: ["x-company-discovery-v1"],
+    });
+  });
+
+  test("durably holds fenced classifier transport failures through the fixed retry timeline", async () => {
+    const t = convexTest(schema, modules);
+    await seedCandidate(t);
+    const expectedRetries = [6, 24, 48, 72].map((hours) => NOW + hours * HOUR_MS);
+
+    for (const [index, retryAt] of expectedRetries.entries()) {
+      const attempt = await claimAndRecordTransportFailure(t, {
+        workerId: `worker-transport-${index}`,
+        classificationRunId: `classification-run-transport-${index}`,
+      });
+      expect(attempt.result).toEqual({ status: "recorded", decision: "hold" });
+      if (index === 0) {
+        expect(await t.mutation(EVIDENCE.recordAdmissionTransportFailureForTest, attempt.args))
+          .toEqual({ status: "replayed", decision: "hold" });
+        await expect(t.mutation(EVIDENCE.recordAdmissionDecisionForTest, {
+          ...attempt.args,
+          modelOutput: "{not-json",
+        })).rejects.toThrow(/COMPANY_MONITORING_CLASSIFICATION_REPLAY_CONFLICT/);
+        await expect(t.mutation(EVIDENCE.recordAdmissionTransportFailureForTest, {
+          ...attempt.args,
+          classificationRunId: "classification-run-transport-fenced",
+          leaseToken: "different-lease",
+        })).rejects.toThrow(/COMPANY_MONITORING_CLASSIFICATION_FENCED/);
+      }
+      const state = await t.run(async (ctx) => ({
+        candidate: await ctx.db.query("companyMonitoringCandidates").unique(),
+        decisions: await ctx.db.query("companyMonitoringAdmissionDecisions").collect(),
+      }));
+      expect(state.candidate).toMatchObject({
+        state: "held",
+        holdUntil: retryAt,
+      });
+      expect(state.candidate).not.toHaveProperty("classificationWorkerId");
+      expect(state.candidate).not.toHaveProperty("classificationLeaseToken");
+      expect(state.candidate).not.toHaveProperty("classificationLeaseExpiresAt");
+      expect(state.decisions[index]).toMatchObject({
+        decision: "hold",
+        reasonCodes: ["classifier_transport_failure"],
+        retryAt,
+        queryVersions: ["x-company-discovery-v1"],
+        classificationSchemaVersion: "cm-classification-schema-v1",
+        admissionPolicyVersion: "cm-admission-policy-v1",
+        sourcePolicyVersion: "cm-source-policy-v1",
+        retryPolicyVersion: "cm-retry-policy-v1",
+        evidenceSelectionPolicyVersion: "cm-evidence-selection-v1",
+        modelVersion: "openrouter/google/gemini-2.5-flash@2026-08-11",
+      });
+      expect(state.decisions[index]?.classification).toBeUndefined();
+      if (retryAt < NOW + 72 * HOUR_MS) {
+        vi.advanceTimersByTime(retryAt - Date.now());
+        await t.finishInProgressScheduledFunctions();
+      }
+    }
+
+    vi.advanceTimersByTime(NOW + 72 * HOUR_MS - Date.now());
+    await t.finishInProgressScheduledFunctions();
+    const terminal = await t.run(async (ctx) => ({
+      candidate: await ctx.db.query("companyMonitoringCandidates").unique(),
+      decisions: await ctx.db.query("companyMonitoringAdmissionDecisions").collect(),
+    }));
+    expect(terminal.candidate).toMatchObject({
+      state: "terminal",
+      terminalReason: "hold_expired",
+      attemptCount: 4,
+    });
+    expect(terminal.decisions.map((row) => row.decision)).toEqual([
+      "hold",
+      "hold",
+      "hold",
+      "hold",
+      "expire",
+    ]);
+    expect(terminal.decisions.at(-1)).toMatchObject({
+      reasonCodes: ["candidate_expired", "classifier_transport_failure"],
       modelVersion: "openrouter/google/gemini-2.5-flash@2026-08-11",
       queryVersions: ["x-company-discovery-v1"],
     });
@@ -381,6 +512,45 @@ describe("Company Monitoring admission decision persistence", () => {
     expect(await t.run(async (ctx) =>
       ctx.db.query("companyMonitoringAdmissionDecisions").collect()
     )).toHaveLength(1);
+  });
+
+  test("fences an expired lease and permits a fresh worker to reclaim", async () => {
+    const t = convexTest(schema, modules);
+    await seedCandidate(t);
+    const staleClaim = await t.mutation(EVIDENCE.claimNextAdmissionCandidateForTest, {
+      workerId: "worker-expired-lease",
+    });
+
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    const freshClaim = await t.mutation(EVIDENCE.claimNextAdmissionCandidateForTest, {
+      workerId: "worker-fresh-lease",
+    });
+    expect(freshClaim.status).toBe("claimed");
+    expect(freshClaim.leaseToken).not.toBe(staleClaim.leaseToken);
+
+    await expect(t.mutation(EVIDENCE.recordAdmissionDecisionForTest, {
+      workerId: "worker-expired-lease",
+      leaseToken: staleClaim.leaseToken!,
+      ownerAccountId: staleClaim.candidate!.ownerAccountId,
+      companyId: staleClaim.candidate!.companyId,
+      occurrenceDedupeKey: staleClaim.candidate!.occurrenceDedupeKey,
+      expectedEvidenceRevision: staleClaim.expectedEvidenceRevision!,
+      classificationRunId: "classification-run-expired-lease",
+      modelVersion: "provider/classifier-v1",
+      modelOutput: publishOutput(staleClaim.candidate!.referenceEvidenceFingerprints[0]!),
+    })).rejects.toThrow(/COMPANY_MONITORING_CLASSIFICATION_FENCED/);
+
+    expect(await t.mutation(EVIDENCE.recordAdmissionDecisionForTest, {
+      workerId: "worker-fresh-lease",
+      leaseToken: freshClaim.leaseToken!,
+      ownerAccountId: freshClaim.candidate!.ownerAccountId,
+      companyId: freshClaim.candidate!.companyId,
+      occurrenceDedupeKey: freshClaim.candidate!.occurrenceDedupeKey,
+      expectedEvidenceRevision: freshClaim.expectedEvidenceRevision!,
+      classificationRunId: "classification-run-fresh-lease",
+      modelVersion: "provider/classifier-v1",
+      modelOutput: publishOutput(freshClaim.candidate!.referenceEvidenceFingerprints[0]!),
+    })).toEqual({ status: "recorded", decision: "publish" });
   });
 
   test("fences a classification when query provenance changes on the same evidence", async () => {

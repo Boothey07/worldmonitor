@@ -190,19 +190,73 @@ describe('company monitoring Railway worker', () => {
     });
   });
 
-  it('leaves the admission lease unfinalized when classifier transport fails', async () => {
+  it('finalizes classifier transport failure as a durable hold and publishes admission health', async () => {
     const calls = [];
+    const health = [];
     const worker = createCompanyMonitoringWorker({
-      client: convexClient([ADMISSION_CLAIM], calls),
+      client: convexClient([
+        { status: 'idle' },
+        ADMISSION_CLAIM,
+        { status: 'recorded', decision: 'hold' },
+      ], calls),
       secret: 'worker-secret',
       workerId: 'worker-a',
       executeAdmission: async () => { throw new Error('provider unavailable'); },
-      classificationRunId: () => 'classification-run-should-not-be-used',
-      publishHealth: async () => true,
+      admissionModelVersion: 'provider/classifier-v1',
+      classificationRunId: () => 'classification-run-transport-1',
+      publishHealth: async (payload) => { health.push(payload); },
     });
 
+    assert.equal(await worker.tick(), 'idle');
+    assert.equal(health.at(-1).status, 'ok');
     assert.equal(await worker.admissionTick(), 'provider_error');
-    assert.equal(calls.length, 1, 'provider failure must not create a policy decision');
+    assert.equal(calls.length, 3, 'provider failure must finalize its leased candidate');
+    assert.deepEqual(calls[2], {
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      leaseToken: 'admission-lease-1',
+      ownerAccountId: 'account-private',
+      companyId: 'company-private',
+      occurrenceDedupeKey: 'occurrence-1',
+      expectedEvidenceRevision: 3,
+      classificationRunId: 'classification-run-transport-1',
+      modelVersion: 'provider/classifier-v1',
+    });
+    assert.equal(health.at(-1).status, 'error');
+    assert.equal(health.at(-1).outcome, 'admission_transport_failure');
+    assert.equal(health.at(-1).counters.admissionClaims, 1);
+    assert.equal(health.at(-1).counters.admissionRecorded, 1);
+    assert.equal(health.at(-1).counters.admissionTransportFailures, 1);
+  });
+
+  it('publishes admission claim and finalize failures through bounded counters', async () => {
+    const claimHealth = [];
+    const claimWorker = createCompanyMonitoringWorker({
+      client: convexClient([new Error('claim unavailable')]),
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      executeAdmission: async () => ({ modelVersion: 'provider/classifier-v1', modelOutput: '{}' }),
+      admissionModelVersion: 'provider/classifier-v1',
+      publishHealth: async (payload) => { claimHealth.push(payload); },
+    });
+    assert.equal(await claimWorker.admissionTick(), 'claim_error');
+    assert.equal(claimHealth.at(-1).outcome, 'admission_claim_error');
+    assert.equal(claimHealth.at(-1).counters.admissionClaimErrors, 1);
+
+    const finalizeHealth = [];
+    const finalizeWorker = createCompanyMonitoringWorker({
+      client: convexClient([ADMISSION_CLAIM, new Error('finalize unavailable')]),
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      executeAdmission: async () => ({ modelVersion: 'provider/classifier-v1', modelOutput: '{}' }),
+      admissionModelVersion: 'provider/classifier-v1',
+      classificationRunId: () => 'classification-run-finalize-error',
+      publishHealth: async (payload) => { finalizeHealth.push(payload); },
+    });
+    assert.equal(await finalizeWorker.admissionTick(), 'finalize_error');
+    assert.equal(finalizeHealth.at(-1).outcome, 'admission_finalize_error');
+    assert.equal(finalizeHealth.at(-1).counters.admissionClaims, 1);
+    assert.equal(finalizeHealth.at(-1).counters.admissionFinalizeErrors, 1);
   });
 
   it('does not claim admission work when classification is not configured', async () => {

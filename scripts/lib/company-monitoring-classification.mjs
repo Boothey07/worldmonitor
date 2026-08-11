@@ -611,3 +611,34 @@ export function evaluateCompanyMonitoringClassification(input) {
     return invalidResult(fallbackBase, "classification_output_invalid_value");
   }
 }
+
+/**
+ * Convert a classifier transport or provider-envelope failure into the same
+ * deterministic retry timeline as a policy hold. This path is deliberately
+ * separate from structured output validation: malformed or missing model
+ * output that reaches `evaluateCompanyMonitoringClassification` still rejects.
+ */
+export function evaluateCompanyMonitoringClassifierTransportFailure(input) {
+  const selectedEvidence = candidateEvidence(input.candidate, input.evidence);
+  const base = resultBase({ ...input, selectedEvidence });
+  if (input.now >= base.terminalAt) {
+    return {
+      ...base,
+      decision: "expire",
+      reasonCodes: ["candidate_expired", "classifier_transport_failure"],
+      classification: null,
+      overallConfidence: null,
+      authority: null,
+      retryAt: null,
+    };
+  }
+  return {
+    ...base,
+    decision: "hold",
+    reasonCodes: ["classifier_transport_failure"],
+    classification: null,
+    overallConfidence: null,
+    authority: null,
+    retryAt: nextRetryAt(input.candidate, input.now, base.terminalAt),
+  };
+}

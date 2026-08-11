@@ -10,6 +10,7 @@ import {
   COMPANY_MONITORING_RETRY_POLICY,
   COMPANY_MONITORING_SOURCE_POLICY_VERSION,
   buildCompanyMonitoringClassificationRequest,
+  evaluateCompanyMonitoringClassifierTransportFailure,
   evaluateCompanyMonitoringClassification,
 } from "../scripts/lib/company-monitoring-classification.mjs";
 
@@ -205,6 +206,20 @@ describe("Company Monitoring strict classifier request contract", () => {
 });
 
 describe("Company Monitoring deterministic admission policy fixtures", () => {
+  it("keeps the complete issue-required fixture contract", () => {
+    assert.deepEqual(fixture.cases.map((testCase: Json) => testCase.name), [
+      "positive contract award publishes from verified first-party X",
+      "negative safety incident publishes with two independent origins",
+      "mixed restructuring publishes with both rationales",
+      "weak X rumor holds",
+      "wrong subsidiary rejects",
+      "conflicting evidence holds",
+      "high-impact weak attribution rejects",
+      "held candidate publishes at retry after corroboration",
+      "held candidate expires by 72 hours",
+    ]);
+  });
+
   for (const testCase of fixture.cases) {
     it(testCase.name, () => {
       if (testCase.initialEvidenceCount) {
@@ -365,6 +380,53 @@ describe("Company Monitoring deterministic admission policy fixtures", () => {
     assert.equal(result.decision, "expire");
     assert.deepEqual(result.reasonCodes, ["candidate_expired"]);
     assert.equal(result.retryAt, null);
+  });
+
+  it("rejects a false occurrence paired with material impact as contradictory", () => {
+    const testCase = scenario("positive contract award publishes from verified first-party X");
+    const output = makeModelOutput({
+      ...testCase.classification,
+      occurrenceTruth: "false",
+      materialityTruth: "material",
+    });
+    const result = evaluate(testCase, { modelOutput: output });
+    assert.equal(result.decision, "reject");
+    assert.deepEqual(result.reasonCodes, ["classification_output_contradictory"]);
+    assert.equal(result.classification, null);
+  });
+});
+
+describe("Company Monitoring classifier transport failure policy", () => {
+  it("holds on fixed checkpoints and expires at the terminal boundary", () => {
+    const testCase = scenario("positive contract award publishes from verified first-party X");
+    const evidence = testCase.evidence.map(makeEvidence);
+    const candidate = makeCandidate(evidence);
+    for (const [elapsedHours, retryHours] of [[0, 6], [6, 24], [24, 48], [48, 72]]) {
+      const result = evaluateCompanyMonitoringClassifierTransportFailure({
+        candidate,
+        evidence,
+        now: fixture.firstDiscoveredAt + elapsedHours * HOUR_MS,
+        modelVersion: MODEL_VERSION,
+      });
+      assert.equal(result.decision, "hold");
+      assert.deepEqual(result.reasonCodes, ["classifier_transport_failure"]);
+      assert.equal(result.retryAt, fixture.firstDiscoveredAt + retryHours * HOUR_MS);
+      assert.equal(result.versions.model, MODEL_VERSION);
+      assert.deepEqual(result.queryVersions, ["cm-x-query-v1"]);
+    }
+
+    const expired = evaluateCompanyMonitoringClassifierTransportFailure({
+      candidate,
+      evidence,
+      now: fixture.firstDiscoveredAt + 72 * HOUR_MS,
+      modelVersion: MODEL_VERSION,
+    });
+    assert.equal(expired.decision, "expire");
+    assert.deepEqual(expired.reasonCodes, [
+      "candidate_expired",
+      "classifier_transport_failure",
+    ]);
+    assert.equal(expired.retryAt, null);
   });
 });
 

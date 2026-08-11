@@ -59,6 +59,12 @@ const COUNTER_NAMES = Object.freeze([
   'executorErrors',
   'claimErrors',
   'finalizeErrors',
+  'admissionClaims',
+  'admissionRecorded',
+  'admissionReplayed',
+  'admissionTransportFailures',
+  'admissionClaimErrors',
+  'admissionFinalizeErrors',
 ]);
 const HEALTH_OUTCOMES = new Set([
   'starting',
@@ -70,16 +76,23 @@ const HEALTH_OUTCOMES = new Set([
   'replayed',
   'claim_error',
   'finalize_error',
+  'admission_recorded',
+  'admission_replayed',
+  'admission_transport_failure',
+  'admission_claim_error',
+  'admission_finalize_error',
 ]);
 const HEALTHY_OUTCOMES = new Set([
   'disabled',
   'idle',
   'completed',
   'replayed',
+  'admission_recorded',
+  'admission_replayed',
 ]);
 
 /** @typedef {'ok' | 'error'} WorkerHealthStatus */
-/** @typedef {'starting' | 'disabled' | 'idle' | 'completed' | 'non_reassuring' | 'fenced' | 'replayed' | 'claim_error' | 'finalize_error'} WorkerOutcome */
+/** @typedef {'starting' | 'disabled' | 'idle' | 'completed' | 'non_reassuring' | 'fenced' | 'replayed' | 'claim_error' | 'finalize_error' | 'admission_recorded' | 'admission_replayed' | 'admission_transport_failure' | 'admission_claim_error' | 'admission_finalize_error'} WorkerOutcome */
 
 function boundedCounter(value) {
   return Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 9_999_999_999) : 0;
@@ -252,6 +265,7 @@ export function createConvexFetch(fetchImpl = globalThis.fetch) {
  * @param {string} options.workerId
  * @param {(work: Record<string, unknown>) => Promise<Record<string, unknown>>} [options.executeClaim]
  * @param {(input: { candidate: Record<string, unknown>, evidence: Record<string, unknown>[] }) => Promise<{ modelVersion: string, modelOutput: unknown }>} [options.executeAdmission]
+ * @param {string} [options.admissionModelVersion]
  * @param {() => string} [options.classificationRunId]
  * @param {(result: Record<string, unknown>, work: Record<string, unknown>) => Promise<void>} [options.afterExecute]
  * @param {(payload: Record<string, unknown>) => Promise<unknown>} [options.publishHealth]
@@ -265,6 +279,7 @@ export function createCompanyMonitoringWorker(options) {
     workerId,
     executeClaim = unavailableExecutor,
     executeAdmission,
+    admissionModelVersion,
     classificationRunId = () => `classification-${randomUUID()}`,
     afterExecute,
     publishHealth = async () => false,
@@ -375,6 +390,8 @@ export function createCompanyMonitoringWorker(options) {
         { secret, workerId },
       );
     } catch {
+      counters.admissionClaimErrors += 1;
+      await safePublish('error', 'admission_claim_error');
       return 'claim_error';
     }
     if (claim?.status === 'idle') return 'idle';
@@ -385,29 +402,75 @@ export function createCompanyMonitoringWorker(options) {
       typeof claim.leaseToken !== 'string' ||
       !Number.isSafeInteger(claim.expectedEvidenceRevision)
     ) {
+      counters.admissionClaimErrors += 1;
+      await safePublish('error', 'admission_claim_error');
       return 'claim_error';
     }
 
+    counters.admissionClaims += 1;
     inFlight = true;
     try {
       let classification;
-      let runId;
+      const runId = classificationRunId();
+      if (typeof runId !== 'string' || runId.length === 0) {
+        counters.admissionFinalizeErrors += 1;
+        await safePublish('error', 'admission_finalize_error');
+        return 'finalize_error';
+      }
       try {
         classification = await executeAdmission({
           candidate: claim.candidate,
           evidence: claim.evidence,
         });
-        runId = classificationRunId();
         if (
           !classification ||
           typeof classification.modelVersion !== 'string' ||
           classification.modelVersion.length === 0 ||
-          typeof runId !== 'string' ||
-          runId.length === 0
+          (admissionModelVersion !== undefined &&
+            classification.modelVersion !== admissionModelVersion)
         ) {
           throw new Error('Classifier returned invalid finalization metadata');
         }
       } catch {
+        const modelVersion = admissionModelVersion;
+        if (typeof modelVersion !== 'string' || modelVersion.length === 0) {
+          counters.admissionFinalizeErrors += 1;
+          await safePublish('error', 'admission_finalize_error');
+          return 'finalize_error';
+        }
+        let failureFinalized;
+        try {
+          failureFinalized = await client.mutation(
+            anyApi.companyMonitoring.orchestration.finalizeAdmissionTransportFailure,
+            {
+              secret,
+              workerId,
+              leaseToken: claim.leaseToken,
+              ownerAccountId: claim.candidate.ownerAccountId,
+              companyId: claim.candidate.companyId,
+              occurrenceDedupeKey: claim.candidate.occurrenceDedupeKey,
+              expectedEvidenceRevision: claim.expectedEvidenceRevision,
+              classificationRunId: runId,
+              modelVersion,
+            },
+          );
+        } catch {
+          counters.admissionFinalizeErrors += 1;
+          await safePublish('error', 'admission_finalize_error');
+          return 'finalize_error';
+        }
+        if (
+          failureFinalized?.status !== 'recorded' &&
+          failureFinalized?.status !== 'replayed'
+        ) {
+          counters.admissionFinalizeErrors += 1;
+          await safePublish('error', 'admission_finalize_error');
+          return 'finalize_error';
+        }
+        counters.admissionTransportFailures += 1;
+        if (failureFinalized.status === 'recorded') counters.admissionRecorded += 1;
+        else counters.admissionReplayed += 1;
+        await safePublish('error', 'admission_transport_failure');
         return 'provider_error';
       }
 
@@ -429,12 +492,23 @@ export function createCompanyMonitoringWorker(options) {
           },
         );
       } catch {
+        counters.admissionFinalizeErrors += 1;
+        await safePublish('error', 'admission_finalize_error');
         return 'finalize_error';
       }
 
-      if (finalized?.status === 'recorded' || finalized?.status === 'replayed') {
-        return finalized.status;
+      if (finalized?.status === 'recorded') {
+        counters.admissionRecorded += 1;
+        await safePublish('ok', 'admission_recorded');
+        return 'recorded';
       }
+      if (finalized?.status === 'replayed') {
+        counters.admissionReplayed += 1;
+        await safePublish('ok', 'admission_replayed');
+        return 'replayed';
+      }
+      counters.admissionFinalizeErrors += 1;
+      await safePublish('error', 'admission_finalize_error');
       return 'finalize_error';
     } finally {
       inFlight = false;
@@ -528,6 +602,7 @@ async function main() {
     workerId: `railway-${process.pid}-${randomUUID()}`,
     executeClaim,
     executeAdmission,
+    admissionModelVersion: classifierModel,
     publishHealth: createRedisHealthPublisher(),
   });
   let shutdownSignal = 'SIGTERM';

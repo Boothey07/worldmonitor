@@ -10,6 +10,7 @@ export const COMPANY_MONITORING_CLASSIFIER_MAX_TIMEOUT_MS = 60_000;
 const OPENROUTER_SITE_URL = 'https://worldmonitor.app';
 const OPENROUTER_APP_TITLE = 'World Monitor';
 const SERVICE_USER_AGENT = 'WorldMonitor-CompanyMonitoring/1.0 (+https://worldmonitor.app)';
+const MAX_PROVIDER_RESPONSE_BYTES = 256 * 1024;
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -57,10 +58,48 @@ function providerResponseError(message, cause) {
   });
 }
 
+async function readBoundedProviderResponse(response) {
+  if (response.body === null) {
+    throw providerResponseError('Classifier provider returned an empty response envelope');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks = [];
+  let byteLength = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      byteLength += value.byteLength;
+      if (byteLength > MAX_PROVIDER_RESPONSE_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The size violation is authoritative even if cancellation fails.
+        }
+        throw providerResponseError('Classifier provider response exceeded the byte limit');
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+  } catch (cause) {
+    if (cause instanceof CompanyMonitoringClassifierTransportError) throw cause;
+    throw providerResponseError('Classifier provider response could not be read', cause);
+  } finally {
+    reader.releaseLock();
+  }
+
+  return chunks.join('');
+}
+
 async function parseProviderEnvelope(response) {
+  const responseText = await readBoundedProviderResponse(response);
   let envelope;
   try {
-    envelope = await response.json();
+    envelope = JSON.parse(responseText);
   } catch (cause) {
     throw providerResponseError('Classifier provider returned an invalid JSON envelope', cause);
   }
@@ -75,8 +114,7 @@ async function parseProviderEnvelope(response) {
   const choice = envelope.choices[0];
   if (
     !isRecord(choice) ||
-    typeof choice.finish_reason !== 'string' ||
-    choice.finish_reason.length === 0 ||
+    choice.finish_reason !== 'stop' ||
     !isRecord(choice.message)
   ) {
     throw providerResponseError('Classifier provider returned an incomplete choice');

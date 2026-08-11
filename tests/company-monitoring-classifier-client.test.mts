@@ -178,15 +178,11 @@ describe('company-monitoring classifier client', () => {
     );
   });
 
-  it('returns malformed or incomplete content unchanged for deterministic rejection', async () => {
-    for (const [content, finishReason] of [
-      ['not-json', 'stop'],
-      ['', 'stop'],
-      ['{"partial":', 'length'],
-    ]) {
+  it('returns malformed content from a complete choice unchanged for deterministic rejection', async () => {
+    for (const content of ['not-json', '', '{"partial":']) {
       const fetchImpl: typeof fetch = async () => jsonResponse({
         choices: [{
-          finish_reason: finishReason,
+          finish_reason: 'stop',
           message: { role: 'assistant', content },
         }],
       });
@@ -201,6 +197,40 @@ describe('company-monitoring classifier client', () => {
 
       assert.equal(result, content);
     }
+  });
+
+  it('fails closed when a choice did not finish normally', async () => {
+    for (const finishReason of ['length', 'content_filter']) {
+      const fetchImpl: typeof fetch = async () => jsonResponse({
+        choices: [{
+          finish_reason: finishReason,
+          message: { role: 'assistant', content: '{}' },
+        }],
+      });
+
+      await assert.rejects(
+        requestCompanyMonitoringClassification({ candidate, evidence, apiKey, model, fetchImpl }),
+        (error: unknown) =>
+          error instanceof CompanyMonitoringClassifierTransportError &&
+          error.code === 'provider_response',
+      );
+    }
+  });
+
+  it('fails closed before parsing an oversized provider envelope', async () => {
+    const fetchImpl: typeof fetch = async () => jsonResponse({
+      choices: [{
+        finish_reason: 'stop',
+        message: { role: 'assistant', content: 'x'.repeat(300_000) },
+      }],
+    });
+
+    await assert.rejects(
+      requestCompanyMonitoringClassification({ candidate, evidence, apiKey, model, fetchImpl }),
+      (error: unknown) =>
+        error instanceof CompanyMonitoringClassifierTransportError &&
+        error.code === 'provider_response',
+    );
   });
 
   it('fails closed on malformed provider envelopes or content', async () => {

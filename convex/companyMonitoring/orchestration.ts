@@ -31,6 +31,7 @@ import {
   purgeAccountCandidatesBatch,
   purgeAccountEvidenceBatch,
   recordAdmissionDecisionHandler,
+  recordAdmissionTransportFailureHandler,
   setAllCompanyProviderEvidenceState,
   setCompanyEvidenceStateForProviderLocators,
 } from "./evidence";
@@ -2320,6 +2321,25 @@ export const finalizeAdmissionCandidate = mutation({
   handler: async (ctx, { secret, ...args }) => {
     await requireWorkerSecret(secret);
     return recordAdmissionDecisionHandler(ctx, args);
+  },
+});
+
+/** Record a fenced classifier transport failure without accepting model output. */
+export const finalizeAdmissionTransportFailure = mutation({
+  args: {
+    secret: v.string(),
+    workerId: v.string(),
+    leaseToken: v.string(),
+    ownerAccountId: v.string(),
+    companyId: v.string(),
+    occurrenceDedupeKey: v.string(),
+    expectedEvidenceRevision: v.number(),
+    classificationRunId: v.string(),
+    modelVersion: v.string(),
+  },
+  handler: async (ctx, { secret, ...args }) => {
+    await requireWorkerSecret(secret);
+    return recordAdmissionTransportFailureHandler(ctx, args);
   },
 });
 
