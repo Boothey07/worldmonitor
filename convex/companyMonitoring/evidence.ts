@@ -16,6 +16,15 @@ import { COMPANY_MONITORING_LIMITS } from "../../shared/company-monitoring-contr
 import {
   companyMonitoringProviderEvidenceValidator,
 } from "./validators";
+import { fingerprint } from "./_shared";
+import {
+  COMPANY_MONITORING_ADMISSION_POLICY_VERSION,
+  COMPANY_MONITORING_CLASSIFICATION_SCHEMA_VERSION,
+  COMPANY_MONITORING_DEFAULT_CONFIDENCE_FLOORS,
+  COMPANY_MONITORING_RETRY_POLICY,
+  COMPANY_MONITORING_SOURCE_POLICY_VERSION,
+  evaluateCompanyMonitoringClassification,
+} from "../../scripts/lib/company-monitoring-classification.mjs";
 
 const EVIDENCE_BATCH_SIZE = 25;
 const CANDIDATE_BATCH_SIZE = 25;
@@ -25,6 +34,9 @@ const MAX_INGESTION_ROWS = 100;
 // companies. Reject a wider internal expansion before the first write so the
 // receipt remains atomic and the mutation cannot exceed its scheduler budget.
 const MAX_EXPANDED_EVIDENCE_ROWS = 25 * 25;
+const ADMISSION_LEASE_MS = 5 * 60 * 1000;
+const ADMISSION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const ADMISSION_MODEL_VERSION = /^[^\u0000-\u001f\u007f]{1,200}$/u;
 
 type EvidenceDoc = Doc<"companyMonitoringEvidence">;
 
@@ -38,6 +50,7 @@ function evidenceShape(row: EvidenceDoc): NormalizedCompanyEvidence {
     companyId: row.companyId,
     provider: row.provider,
     providerLocator: row.providerLocator,
+    ...(row.queryVersion ? { queryVersion: row.queryVersion } : {}),
     providerLocatorHash: row.providerLocatorHash,
     providerOrigin: row.providerOrigin,
     providerOriginFingerprint: row.providerOriginFingerprint,
@@ -224,13 +237,43 @@ async function recomputeOccurrenceCandidate(
         .eq("occurrenceDedupeKey", occurrenceDedupeKey),
     )
     .unique();
+  if (
+    existing &&
+    existing.expiresAt <= now &&
+    existing.state !== "terminal"
+  ) {
+    await terminalizeSystemDecision(
+      ctx,
+      existing,
+      "expire",
+      "candidate_expired",
+      "hold_expired",
+      now,
+    );
+    return;
+  }
   if (active.length > 0) {
     const ranked = active.map(evidenceShape).sort(compareCompanyEvidence);
     const selected = ranked.slice(0, COMPANY_MONITORING_EVIDENCE_POLICY.maxReferences);
+    const evidenceSnapshotDigest = await fingerprint({
+      version: "cm-candidate-evidence-snapshot-v1",
+      selectionPolicyVersion: COMPANY_MONITORING_EVIDENCE_POLICY.version,
+      referenceCount: active.length,
+      referencesTruncated: active.length > selected.length,
+      references: selected.map((evidence) => ({
+        evidenceFingerprint: evidence.evidenceFingerprint,
+        sourceAuthority: evidence.sourceAuthority,
+        independence: evidence.independence,
+        queryVersion: evidence.queryVersion ?? null,
+      })),
+    });
+    const evidenceChanged = existing?.evidenceSnapshotDigest !== evidenceSnapshotDigest;
     const first = [...active].sort((left, right) =>
       left.observedAt - right.observedAt || left.evidenceFingerprint.localeCompare(right.evidenceFingerprint)
     )[0]!;
-    const lifecycle = candidateLifecycle(existing, now);
+    const lifecycle = evidenceChanged && existing?.state === "held"
+      ? { state: "pending_classification" as const }
+      : candidateLifecycle(existing, now);
     const row = {
       ownerAccountId,
       companyId,
@@ -248,7 +291,21 @@ async function recomputeOccurrenceCandidate(
       referenceCount: active.length,
       referencesTruncated: active.length > selected.length,
       selectionPolicyVersion: COMPANY_MONITORING_EVIDENCE_POLICY.version,
-      evidenceRevision: (existing?.evidenceRevision ?? 0) + 1,
+      evidenceRevision: existing
+        ? existing.evidenceRevision + (evidenceChanged ? 1 : 0)
+        : 1,
+      evidenceSnapshotDigest,
+      ...(existing?.lastAdmissionDecisionId
+        ? { lastAdmissionDecisionId: existing.lastAdmissionDecisionId }
+        : {}),
+      ...(!evidenceChanged && existing?.classificationWorkerId &&
+          existing.classificationLeaseToken && existing.classificationLeaseExpiresAt !== undefined
+        ? {
+            classificationWorkerId: existing.classificationWorkerId,
+            classificationLeaseToken: existing.classificationLeaseToken,
+            classificationLeaseExpiresAt: existing.classificationLeaseExpiresAt,
+          }
+        : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -283,20 +340,32 @@ async function recomputeOccurrenceCandidate(
     });
     return;
   }
+  const terminalReason = fallbackLossReason ?? await occurrenceLossReason(
+    ctx,
+    ownerAccountId,
+    companyId,
+    occurrenceDedupeKey,
+  );
+  await terminalizeSystemDecision(
+    ctx,
+    existing,
+    "expire",
+    `candidate_${terminalReason}`,
+    terminalReason,
+    now,
+  );
   await ctx.db.patch(existing._id, {
-    state: "terminal",
-    holdUntil: undefined,
-    terminalReason: fallbackLossReason ?? await occurrenceLossReason(
-      ctx,
-      ownerAccountId,
-      companyId,
-      occurrenceDedupeKey,
-    ),
-    observationBlocking: false,
     referenceEvidenceFingerprints: [],
     referenceCount: 0,
     referencesTruncated: false,
     evidenceRevision: existing.evidenceRevision + 1,
+    evidenceSnapshotDigest: await fingerprint({
+      version: "cm-candidate-evidence-snapshot-v1",
+      selectionPolicyVersion: existing.selectionPolicyVersion,
+      referenceCount: 0,
+      referencesTruncated: false,
+      references: [],
+    }),
     updatedAt: now,
   });
 }
@@ -505,6 +574,7 @@ function providerEvidenceFromRow(row: EvidenceDoc): ProviderEvidence {
   return {
     provider: row.provider,
     providerLocator: row.providerLocator,
+    ...(row.queryVersion ? { queryVersion: row.queryVersion } : {}),
     ...(row.url ? { url: row.url } : {}),
     ...(row.title ? { title: row.title } : {}),
     ...(row.text ? { text: row.text } : {}),
@@ -755,6 +825,16 @@ export async function purgeCompanyCandidatesBatch(
   ownerAccountId: string,
   companyId: string,
 ) {
+  const decisions = await ctx.db
+    .query("companyMonitoringAdmissionDecisions")
+    .withIndex("by_account_company", (q) =>
+      q.eq("ownerAccountId", ownerAccountId).eq("companyId", companyId),
+    )
+    .take(CANDIDATE_BATCH_SIZE + 1);
+  for (const row of decisions.slice(0, CANDIDATE_BATCH_SIZE)) await ctx.db.delete(row._id);
+  if (decisions.length > CANDIDATE_BATCH_SIZE) {
+    return { complete: false, deleted: decisions.length - 1 };
+  }
   const page = await ctx.db
     .query("companyMonitoringCandidates")
     .withIndex("by_account_company", (q) =>
@@ -763,7 +843,10 @@ export async function purgeCompanyCandidatesBatch(
     .take(CANDIDATE_BATCH_SIZE + 1);
   const batch = page.slice(0, CANDIDATE_BATCH_SIZE);
   for (const row of batch) await ctx.db.delete(row._id);
-  return { complete: page.length <= CANDIDATE_BATCH_SIZE, deleted: batch.length };
+  return {
+    complete: page.length <= CANDIDATE_BATCH_SIZE,
+    deleted: batch.length + decisions.length,
+  };
 }
 
 export async function purgeAccountEvidenceBatch(ctx: MutationCtx, ownerAccountId: string) {
@@ -776,6 +859,12 @@ export async function purgeAccountEvidenceBatch(ctx: MutationCtx, ownerAccountId
 }
 
 export async function purgeAccountCandidatesBatch(ctx: MutationCtx, ownerAccountId: string) {
+  const decisions = await ctx.db
+    .query("companyMonitoringAdmissionDecisions")
+    .withIndex("by_account_company", (q) => q.eq("ownerAccountId", ownerAccountId))
+    .take(CANDIDATE_BATCH_SIZE + 1);
+  for (const row of decisions.slice(0, CANDIDATE_BATCH_SIZE)) await ctx.db.delete(row._id);
+  if (decisions.length > CANDIDATE_BATCH_SIZE) return { complete: false };
   const page = await ctx.db
     .query("companyMonitoringCandidates")
     .withIndex("by_account_company", (q) => q.eq("ownerAccountId", ownerAccountId))
@@ -914,19 +1003,513 @@ export const setAllCompanyProviderEvidenceStateForTest = internalMutation({
   handler: setAllCompanyProviderEvidenceState,
 });
 
-// Classifier state changes stay behind an internal mutation.
-export const recordCandidateAttempt = internalMutation({
+function admissionIdentifier(value: string, field: string) {
+  if (!ADMISSION_ID.test(value)) {
+    throw new ConvexError(`COMPANY_MONITORING_${field}_INVALID`);
+  }
+  return value;
+}
+
+function admissionModelVersion(value: string) {
+  if (
+    value !== value.trim() ||
+    !ADMISSION_MODEL_VERSION.test(value)
+  ) {
+    throw new ConvexError("COMPANY_MONITORING_MODEL_VERSION_INVALID");
+  }
+  return value;
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(row).sort().map((key) => [key, canonicalValue(row[key])]),
+    );
+  }
+  return value;
+}
+
+function admissionLeaseToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function referencedEvidence(
+  ctx: MutationCtx,
+  candidate: Doc<"companyMonitoringCandidates">,
+  now: number,
+  allowExpired = false,
+) {
+  if (
+    candidate.referenceEvidenceFingerprints.length === 0 ||
+    new Set(candidate.referenceEvidenceFingerprints).size !==
+      candidate.referenceEvidenceFingerprints.length ||
+    candidate.referenceCount < candidate.referenceEvidenceFingerprints.length
+  ) {
+    throw new ConvexError("COMPANY_MONITORING_ADMISSION_EVIDENCE_INVALID");
+  }
+  const rows = await Promise.all(candidate.referenceEvidenceFingerprints.map((evidenceFingerprint) =>
+    ctx.db
+      .query("companyMonitoringEvidence")
+      .withIndex("by_account_company_fingerprint", (q) =>
+        q
+          .eq("ownerAccountId", candidate.ownerAccountId)
+          .eq("companyId", candidate.companyId)
+          .eq("evidenceFingerprint", evidenceFingerprint),
+      )
+      .unique()
+  ));
+  if (rows.some((row) => !row)) {
+    throw new ConvexError("COMPANY_MONITORING_ADMISSION_EVIDENCE_MISSING");
+  }
+  const evidence = rows.map((row) => row!);
+  for (const row of evidence) {
+    if (
+      row.occurrenceDedupeKey !== candidate.occurrenceDedupeKey ||
+      (!allowExpired && (
+        row.state !== "active" ||
+        (row.expiresAt !== undefined && row.expiresAt <= now)
+      )) ||
+      (row.sourceAuthority === "verified_first_party" &&
+        (
+          row.independence !== "first_party" ||
+          (row.provider === "exa" && row.matchedClaimIds.length === 0)
+        ))
+    ) {
+      throw new ConvexError("COMPANY_MONITORING_ADMISSION_EVIDENCE_INVALID");
+    }
+    if (!row.queryVersion || !ADMISSION_ID.test(row.queryVersion)) {
+      throw new ConvexError("COMPANY_MONITORING_ADMISSION_QUERY_VERSION_INVALID");
+    }
+  }
+  const shaped = evidence.map(evidenceShape);
+  const evidenceSnapshotDigest = await fingerprint({
+    version: "cm-candidate-evidence-snapshot-v1",
+    selectionPolicyVersion: candidate.selectionPolicyVersion,
+    referenceCount: candidate.referenceCount,
+    referencesTruncated: candidate.referencesTruncated,
+    references: shaped.map((row) => ({
+      evidenceFingerprint: row.evidenceFingerprint,
+      sourceAuthority: row.sourceAuthority,
+      independence: row.independence,
+      queryVersion: row.queryVersion ?? null,
+    })),
+  });
+  if (candidate.evidenceSnapshotDigest !== evidenceSnapshotDigest) {
+    throw new ConvexError("COMPANY_MONITORING_ADMISSION_EVIDENCE_STALE");
+  }
+  return shaped;
+}
+
+function decisionVersions(candidate: Doc<"companyMonitoringCandidates">, modelVersion: string) {
+  return {
+    classificationSchemaVersion: COMPANY_MONITORING_CLASSIFICATION_SCHEMA_VERSION,
+    admissionPolicyVersion: COMPANY_MONITORING_ADMISSION_POLICY_VERSION,
+    sourcePolicyVersion: COMPANY_MONITORING_SOURCE_POLICY_VERSION,
+    retryPolicyVersion: COMPANY_MONITORING_RETRY_POLICY.version,
+    evidenceSelectionPolicyVersion: candidate.selectionPolicyVersion,
+    modelVersion,
+  };
+}
+
+async function appendSystemDecision(
+  ctx: MutationCtx,
+  candidate: Doc<"companyMonitoringCandidates">,
+  decision: "reject" | "expire",
+  reasonCode: string,
+  now: number,
+) {
+  const classificationRunId = `system-${decision}-${candidate.candidateId}-${candidate.evidenceRevision}`
+    .slice(0, 128);
+  const existing = await ctx.db
+    .query("companyMonitoringAdmissionDecisions")
+    .withIndex("by_replay_fence", (q) =>
+      q
+        .eq("ownerAccountId", candidate.ownerAccountId)
+        .eq("companyId", candidate.companyId)
+        .eq("occurrenceDedupeKey", candidate.occurrenceDedupeKey)
+        .eq("evidenceRevision", candidate.evidenceRevision)
+        .eq("classificationRunId", classificationRunId),
+    )
+    .unique();
+  if (existing) return existing._id;
+  const previous = candidate.lastAdmissionDecisionId
+    ? await ctx.db.get(candidate.lastAdmissionDecisionId)
+    : null;
+  let evidence: NormalizedCompanyEvidence[] = [];
+  try {
+    evidence = await referencedEvidence(ctx, candidate, now, true);
+  } catch {
+    // A system terminal decision must still be durable when evidence was
+    // removed. Empty provenance is explicit and cannot admit the candidate.
+  }
+  const queryVersions = previous?.queryVersions ?? [...new Set(
+    evidence.flatMap((row) => row.queryVersion ? [row.queryVersion] : []),
+  )].sort();
+  return ctx.db.insert("companyMonitoringAdmissionDecisions", {
+    ownerAccountId: candidate.ownerAccountId,
+    companyId: candidate.companyId,
+    candidateId: candidate.candidateId,
+    occurrenceDedupeKey: candidate.occurrenceDedupeKey,
+    evidenceRevision: candidate.evidenceRevision,
+    classificationRunId,
+    submissionDigest: await fingerprint({ decision, reasonCode, classificationRunId }),
+    decision,
+    reasonCodes: [...new Set([
+      ...(decision === "expire" && previous?.decision === "hold"
+        ? previous.reasonCodes
+        : []),
+      reasonCode,
+    ])].sort(),
+    referenceEvidenceFingerprints: [...candidate.referenceEvidenceFingerprints],
+    confidenceFloors: previous?.confidenceFloors ?? COMPANY_MONITORING_DEFAULT_CONFIDENCE_FLOORS,
+    ...(previous?.classification ? { classification: previous.classification } : {}),
+    ...(previous?.overallConfidence !== undefined
+      ? { overallConfidence: previous.overallConfidence }
+      : {}),
+    ...(previous?.authority ? { authority: previous.authority } : {}),
+    queryVersions,
+    ...(previous
+      ? {
+          classificationSchemaVersion: previous.classificationSchemaVersion,
+          admissionPolicyVersion: previous.admissionPolicyVersion,
+          sourcePolicyVersion: previous.sourcePolicyVersion,
+          retryPolicyVersion: previous.retryPolicyVersion,
+          evidenceSelectionPolicyVersion: previous.evidenceSelectionPolicyVersion,
+          modelVersion: previous.modelVersion,
+          previousDecisionId: previous._id,
+        }
+      : decisionVersions(candidate, "not-invoked")),
+    terminalAt: candidate.expiresAt,
+    decidedAt: now,
+  });
+}
+
+async function admissionScopeIsActive(
+  ctx: MutationCtx,
+  candidate: Doc<"companyMonitoringCandidates">,
+) {
+  const [account, company] = await Promise.all([
+    ctx.db
+      .query("companyMonitoringAccounts")
+      .withIndex("by_logicalAccountId", (q) =>
+        q.eq("logicalAccountId", candidate.ownerAccountId),
+      )
+      .unique(),
+    ctx.db
+      .query("companyMonitoringCompanies")
+      .withIndex("by_account_companyId", (q) =>
+        q
+          .eq("ownerAccountId", candidate.ownerAccountId)
+          .eq("companyId", candidate.companyId),
+      )
+      .unique(),
+  ]);
+  return Boolean(
+    account &&
+    account.lifecycle === "entitled" &&
+    !account.terminalReason &&
+    company &&
+    company.lifecycle === "active",
+  );
+}
+
+async function terminalizeSystemDecision(
+  ctx: MutationCtx,
+  candidate: Doc<"companyMonitoringCandidates">,
+  decision: "reject" | "expire",
+  reasonCode: string,
+  terminalReason: "rejected" | "hold_expired" | "evidence_deleted" |
+    "evidence_expired" | "authority_lost" | "evidence_unavailable",
+  now: number,
+) {
+  if (candidate.state === "terminal") return candidate.lastAdmissionDecisionId;
+  const decisionId = await appendSystemDecision(ctx, candidate, decision, reasonCode, now);
+  await ctx.db.patch(candidate._id, {
+    state: "terminal",
+    terminalReason,
+    holdUntil: undefined,
+    observationBlocking: false,
+    classificationWorkerId: undefined,
+    classificationLeaseToken: undefined,
+    classificationLeaseExpiresAt: undefined,
+    lastAdmissionDecisionId: decisionId,
+    updatedAt: now,
+  });
+  return decisionId;
+}
+
+export async function claimNextAdmissionCandidateHandler(
+  ctx: MutationCtx,
+  rawWorkerId: string,
+) {
+  const workerId = admissionIdentifier(rawWorkerId, "ADMISSION_WORKER_ID");
+  const now = Date.now();
+  const candidates = await ctx.db
+    .query("companyMonitoringCandidates")
+    .withIndex("by_state_updatedAt", (q) => q.eq("state", "pending_classification"))
+    .take(32);
+  for (const candidate of candidates) {
+    if (!await admissionScopeIsActive(ctx, candidate)) {
+      await terminalizeSystemDecision(
+        ctx,
+        candidate,
+        "reject",
+        "candidate_owner_inactive",
+        "rejected",
+        now,
+      );
+      continue;
+    }
+    if (candidate.expiresAt <= now) {
+      await terminalizeSystemDecision(
+        ctx,
+        candidate,
+        "expire",
+        "candidate_expired",
+        "hold_expired",
+        now,
+      );
+      continue;
+    }
+    if (
+      candidate.classificationLeaseExpiresAt !== undefined &&
+      candidate.classificationLeaseExpiresAt > now
+    ) continue;
+    let evidence;
+    try {
+      evidence = await referencedEvidence(ctx, candidate, now);
+    } catch (error) {
+      const reason = error instanceof ConvexError &&
+          String(error.data).includes("QUERY_VERSION")
+        ? "trusted_evidence_query_version_missing"
+        : "trusted_evidence_invalid";
+      await terminalizeSystemDecision(ctx, candidate, "reject", reason, "rejected", now);
+      continue;
+    }
+    const leaseToken = admissionLeaseToken();
+    const leaseExpiresAt = Math.min(candidate.expiresAt, now + ADMISSION_LEASE_MS);
+    await ctx.db.patch(candidate._id, {
+      classificationWorkerId: workerId,
+      classificationLeaseToken: leaseToken,
+      classificationLeaseExpiresAt: leaseExpiresAt,
+      updatedAt: now,
+    });
+    return {
+      status: "claimed" as const,
+      leaseToken,
+      leaseExpiresAt,
+      expectedEvidenceRevision: candidate.evidenceRevision,
+      candidate: {
+        ownerAccountId: candidate.ownerAccountId,
+        companyId: candidate.companyId,
+        candidateId: candidate.candidateId,
+        occurrenceDedupeKey: candidate.occurrenceDedupeKey,
+        firstDiscoveredAt: candidate.firstDiscoveredAt,
+        attemptCount: candidate.attemptCount,
+        expiresAt: candidate.expiresAt,
+        referenceEvidenceFingerprints: candidate.referenceEvidenceFingerprints,
+        referencesTruncated: candidate.referencesTruncated,
+        selectionPolicyVersion: candidate.selectionPolicyVersion,
+      },
+      evidence,
+    };
+  }
+  return { status: "idle" as const };
+}
+
+export async function recordAdmissionDecisionHandler(
+  ctx: MutationCtx,
+  args: {
+    workerId: string;
+    leaseToken: string;
+    ownerAccountId: string;
+    companyId: string;
+    occurrenceDedupeKey: string;
+    expectedEvidenceRevision: number;
+    classificationRunId: string;
+    modelVersion: string;
+    modelOutput?: unknown;
+  },
+) {
+  const workerId = admissionIdentifier(args.workerId, "ADMISSION_WORKER_ID");
+  const leaseToken = admissionIdentifier(args.leaseToken, "ADMISSION_LEASE");
+  const classificationRunId = admissionIdentifier(
+    args.classificationRunId,
+    "CLASSIFICATION_RUN_ID",
+  );
+  const modelVersion = admissionModelVersion(args.modelVersion);
+  if (!Number.isSafeInteger(args.expectedEvidenceRevision) || args.expectedEvidenceRevision < 1) {
+    throw new ConvexError("COMPANY_MONITORING_EVIDENCE_REVISION_INVALID");
+  }
+  const submissionDigest = await fingerprint(canonicalValue({
+    modelVersion,
+    modelOutput: args.modelOutput,
+  }));
+  const replay = await ctx.db
+    .query("companyMonitoringAdmissionDecisions")
+    .withIndex("by_replay_fence", (q) =>
+      q
+        .eq("ownerAccountId", args.ownerAccountId)
+        .eq("companyId", args.companyId)
+        .eq("occurrenceDedupeKey", args.occurrenceDedupeKey)
+        .eq("evidenceRevision", args.expectedEvidenceRevision)
+        .eq("classificationRunId", classificationRunId),
+    )
+    .unique();
+  if (replay) {
+    if (replay.submissionDigest !== submissionDigest) {
+      throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_REPLAY_CONFLICT");
+    }
+    return { status: "replayed" as const, decision: replay.decision };
+  }
+  const candidate = await ctx.db
+    .query("companyMonitoringCandidates")
+    .withIndex("by_account_company_occurrence", (q) =>
+      q
+        .eq("ownerAccountId", args.ownerAccountId)
+        .eq("companyId", args.companyId)
+        .eq("occurrenceDedupeKey", args.occurrenceDedupeKey),
+    )
+    .unique();
+  const now = Date.now();
+  if (
+    !candidate ||
+    candidate.state !== "pending_classification" ||
+    candidate.evidenceRevision !== args.expectedEvidenceRevision ||
+    candidate.classificationWorkerId !== workerId ||
+    candidate.classificationLeaseToken !== leaseToken ||
+    candidate.classificationLeaseExpiresAt === undefined ||
+    candidate.classificationLeaseExpiresAt <= now
+  ) {
+    throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_FENCED");
+  }
+  if (!await admissionScopeIsActive(ctx, candidate)) {
+    throw new ConvexError("COMPANY_MONITORING_CLASSIFICATION_FENCED");
+  }
+  if (candidate.expiresAt <= now) {
+    await terminalizeSystemDecision(
+      ctx,
+      candidate,
+      "expire",
+      "candidate_expired",
+      "hold_expired",
+      now,
+    );
+    return { status: "recorded" as const, decision: "expire" as const };
+  }
+  const evidence = await referencedEvidence(ctx, candidate, now);
+  const result = evaluateCompanyMonitoringClassification({
+    candidate,
+    evidence,
+    modelOutput: args.modelOutput,
+    now,
+    modelVersion,
+  });
+  const derivedQueryVersions = [...new Set(evidence.map((row) => row.queryVersion!))].sort();
+  if (
+    result.queryVersions.length !== derivedQueryVersions.length ||
+    result.queryVersions.some((version: string, index: number) =>
+      version !== derivedQueryVersions[index]
+    )
+  ) {
+    throw new ConvexError("COMPANY_MONITORING_ADMISSION_QUERY_VERSIONS_INVALID");
+  }
+  const decisionId = await ctx.db.insert("companyMonitoringAdmissionDecisions", {
+    ownerAccountId: candidate.ownerAccountId,
+    companyId: candidate.companyId,
+    candidateId: candidate.candidateId,
+    occurrenceDedupeKey: candidate.occurrenceDedupeKey,
+    evidenceRevision: candidate.evidenceRevision,
+    classificationRunId,
+    submissionDigest,
+    decision: result.decision,
+    reasonCodes: result.reasonCodes,
+    referenceEvidenceFingerprints: [...candidate.referenceEvidenceFingerprints],
+    confidenceFloors: result.confidenceFloors,
+    ...(result.classification ? { classification: result.classification } : {}),
+    ...(result.overallConfidence !== null
+      ? { overallConfidence: result.overallConfidence }
+      : {}),
+    ...(result.authority ? { authority: result.authority } : {}),
+    queryVersions: derivedQueryVersions,
+    classificationSchemaVersion: result.versions.classificationSchema,
+    admissionPolicyVersion: result.versions.admissionPolicy,
+    sourcePolicyVersion: result.versions.sourcePolicy,
+    retryPolicyVersion: result.versions.retryPolicy,
+    evidenceSelectionPolicyVersion: result.versions.evidenceSelection,
+    modelVersion: result.versions.model,
+    ...(result.retryAt !== null ? { retryAt: result.retryAt } : {}),
+    terminalAt: result.terminalAt,
+    decidedAt: result.decidedAt,
+    ...(candidate.lastAdmissionDecisionId
+      ? { previousDecisionId: candidate.lastAdmissionDecisionId }
+      : {}),
+  });
+  const attemptCount = candidate.attemptCount + 1;
+  if (result.decision === "hold") {
+    if (
+      !Number.isSafeInteger(result.retryAt) ||
+      result.retryAt <= now ||
+      result.retryAt > candidate.expiresAt
+    ) {
+      throw new ConvexError("COMPANY_MONITORING_CANDIDATE_HOLD_INVALID");
+    }
+    await ctx.db.patch(candidate._id, {
+      state: "held",
+      holdUntil: result.retryAt,
+      terminalReason: undefined,
+      attemptCount,
+      lastAdmissionDecisionId: decisionId,
+      classificationWorkerId: undefined,
+      classificationLeaseToken: undefined,
+      classificationLeaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAt(
+      result.retryAt,
+      internal.companyMonitoring.evidence.releaseHeldAdmissionCandidate,
+      {
+        ownerAccountId: candidate.ownerAccountId,
+        companyId: candidate.companyId,
+        occurrenceDedupeKey: candidate.occurrenceDedupeKey,
+        expectedEvidenceRevision: candidate.evidenceRevision,
+        expectedDecisionId: decisionId,
+        expectedHoldUntil: result.retryAt,
+      },
+    );
+  } else {
+    await ctx.db.patch(candidate._id, {
+      state: "terminal",
+      holdUntil: undefined,
+      terminalReason: result.decision === "publish"
+        ? "admitted"
+        : result.decision === "reject"
+          ? "rejected"
+          : "hold_expired",
+      observationBlocking: false,
+      attemptCount,
+      lastAdmissionDecisionId: decisionId,
+      classificationWorkerId: undefined,
+      classificationLeaseToken: undefined,
+      classificationLeaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+  }
+  return { status: "recorded" as const, decision: result.decision };
+}
+
+export const releaseHeldAdmissionCandidate = internalMutation({
   args: {
     ownerAccountId: v.string(),
     companyId: v.string(),
     occurrenceDedupeKey: v.string(),
-    outcome: v.union(
-      v.literal("pending"),
-      v.literal("held"),
-      v.literal("admitted"),
-      v.literal("rejected"),
-    ),
-    holdUntil: v.optional(v.number()),
+    expectedEvidenceRevision: v.number(),
+    expectedDecisionId: v.id("companyMonitoringAdmissionDecisions"),
+    expectedHoldUntil: v.number(),
   },
   handler: async (ctx, args) => {
     const candidate = await ctx.db
@@ -939,54 +1522,50 @@ export const recordCandidateAttempt = internalMutation({
       )
       .unique();
     const now = Date.now();
-    if (!candidate || candidate.state === "terminal" || candidate.expiresAt <= now) {
-      throw new ConvexError("COMPANY_MONITORING_CANDIDATE_NOT_ACTIVE");
-    }
-    const attemptCount = candidate.attemptCount + 1;
-    if (args.outcome === "held") {
-      const holdUntil = args.holdUntil;
-      if (
-        typeof holdUntil !== "number" ||
-        !Number.isSafeInteger(holdUntil) ||
-        holdUntil <= now ||
-        holdUntil > candidate.expiresAt
-      ) {
-        throw new ConvexError("COMPANY_MONITORING_CANDIDATE_HOLD_INVALID");
-      }
-      await ctx.db.patch(candidate._id, {
-        state: "held",
-        holdUntil,
-        terminalReason: undefined,
-        attemptCount,
-        updatedAt: now,
-      });
-      await ctx.scheduler.runAt(
-        holdUntil,
-        internal.companyMonitoring.evidence.recomputeCompanyEvidence,
-        {
-          ownerAccountId: args.ownerAccountId,
-          companyId: args.companyId,
-          occurrenceDedupeKey: args.occurrenceDedupeKey,
-        },
+    if (
+      !candidate ||
+      candidate.state !== "held" ||
+      candidate.evidenceRevision !== args.expectedEvidenceRevision ||
+      candidate.lastAdmissionDecisionId !== args.expectedDecisionId ||
+      candidate.holdUntil !== args.expectedHoldUntil ||
+      args.expectedHoldUntil > now
+    ) return { status: "stale" as const };
+    if (candidate.expiresAt <= now) {
+      await terminalizeSystemDecision(
+        ctx,
+        candidate,
+        "expire",
+        "candidate_expired",
+        "hold_expired",
+        now,
       );
-    } else if (args.outcome === "pending") {
-      await ctx.db.patch(candidate._id, {
-        state: "pending_classification",
-        holdUntil: undefined,
-        terminalReason: undefined,
-        attemptCount,
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.patch(candidate._id, {
-        state: "terminal",
-        holdUntil: undefined,
-        terminalReason: args.outcome,
-        observationBlocking: false,
-        attemptCount,
-        updatedAt: now,
-      });
+      return { status: "expired" as const };
     }
-    return { status: args.outcome, attemptCount };
+    await ctx.db.patch(candidate._id, {
+      state: "pending_classification",
+      holdUntil: undefined,
+      updatedAt: now,
+    });
+    return { status: "released" as const };
   },
+});
+
+export const claimNextAdmissionCandidateForTest = internalMutation({
+  args: { workerId: v.string() },
+  handler: (ctx, args) => claimNextAdmissionCandidateHandler(ctx, args.workerId),
+});
+
+export const recordAdmissionDecisionForTest = internalMutation({
+  args: {
+    workerId: v.string(),
+    leaseToken: v.string(),
+    ownerAccountId: v.string(),
+    companyId: v.string(),
+    occurrenceDedupeKey: v.string(),
+    expectedEvidenceRevision: v.number(),
+    classificationRunId: v.string(),
+    modelVersion: v.string(),
+    modelOutput: v.optional(v.any()),
+  },
+  handler: recordAdmissionDecisionHandler,
 });

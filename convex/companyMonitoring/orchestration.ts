@@ -25,9 +25,11 @@ import {
   companyMonitoringXIngestionValidator,
 } from "./validators";
 import {
+  claimNextAdmissionCandidateHandler,
   ingestCompanyEvidenceForCompanyIds,
   purgeAccountCandidatesBatch,
   purgeAccountEvidenceBatch,
+  recordAdmissionDecisionHandler,
   setAllCompanyProviderEvidenceState,
   setCompanyEvidenceStateForProviderLocators,
 } from "./evidence";
@@ -1901,6 +1903,7 @@ async function applyExaIngestion(
     evidence: payload.candidates.map((candidate) => ({
       provider: "exa" as const,
       providerLocator: candidate.providerResultId,
+      queryVersion: work.queryVersion,
       url: candidate.url,
       ...(candidate.title ? { title: candidate.title } : {}),
       ...(candidate.author ? { author: candidate.author } : {}),
@@ -1963,6 +1966,7 @@ async function syncNormalizedXEvidence(
       normalizedRows.push({
         provider: "x",
         providerLocator: canonicalPostId,
+        queryVersion: work.queryVersion,
         url: `https://x.com/i/status/${canonicalPostId}`,
         text: stored.text,
         author: stored.currentHandle,
@@ -2292,6 +2296,35 @@ export const finalizeWork = mutation({
   handler: async (ctx, args) => {
     await requireWorkerSecret(args.secret);
     return finalizeWorkHandler(ctx, args);
+  },
+});
+
+/** Claim one exact normalized-evidence snapshot for deterministic classification. */
+export const claimNextAdmissionCandidate = mutation({
+  args: { secret: v.string(), workerId: v.string() },
+  handler: async (ctx, args) => {
+    await requireWorkerSecret(args.secret);
+    return claimNextAdmissionCandidateHandler(ctx, args.workerId);
+  },
+});
+
+/** Validate untrusted model output and append the fenced policy decision. */
+export const finalizeAdmissionCandidate = mutation({
+  args: {
+    secret: v.string(),
+    workerId: v.string(),
+    leaseToken: v.string(),
+    ownerAccountId: v.string(),
+    companyId: v.string(),
+    occurrenceDedupeKey: v.string(),
+    expectedEvidenceRevision: v.number(),
+    classificationRunId: v.string(),
+    modelVersion: v.string(),
+    modelOutput: v.optional(v.any()),
+  },
+  handler: async (ctx, { secret, ...args }) => {
+    await requireWorkerSecret(secret);
+    return recordAdmissionDecisionHandler(ctx, args);
   },
 });
 
