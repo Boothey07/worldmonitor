@@ -27,6 +27,9 @@ import {
   COMPANY_MONITORING_EXA_CONTRACT,
   createExaCohortExecutor,
 } from './lib/company-monitoring-exa.mjs';
+import {
+  requestCompanyMonitoringClassification,
+} from './lib/company-monitoring-classifier-client.mjs';
 import { isMainModule } from './lib/main-module.mjs';
 
 export const COMPANY_MONITORING_WORKER_HEALTH_KEY = 'company-monitoring:worker-health:v1';
@@ -188,6 +191,30 @@ export function createCompanyMonitoringExecutor(options = {}) {
   };
 }
 
+/**
+ * Bind explicit classifier configuration to the provider transport. The raw
+ * content remains untrusted; Convex applies the deterministic policy when it
+ * finalizes the leased candidate.
+ *
+ * @param {object} options
+ * @param {string | undefined} options.apiKey
+ * @param {string | undefined} options.model
+ * @param {typeof fetch} [options.fetchImpl]
+ */
+export function createCompanyMonitoringAdmissionClassifier(options) {
+  const { apiKey, model, fetchImpl } = options;
+  return async ({ candidate, evidence }) => ({
+    modelVersion: model,
+    modelOutput: await requestCompanyMonitoringClassification({
+      candidate,
+      evidence,
+      apiKey,
+      model,
+      fetchImpl,
+    }),
+  });
+}
+
 function finalizeResult(execution) {
   if (execution?.finalizeResult && typeof execution.finalizeResult === 'object') {
     return execution.finalizeResult;
@@ -224,6 +251,8 @@ export function createConvexFetch(fetchImpl = globalThis.fetch) {
  * @param {string} options.secret
  * @param {string} options.workerId
  * @param {(work: Record<string, unknown>) => Promise<Record<string, unknown>>} [options.executeClaim]
+ * @param {(input: { candidate: Record<string, unknown>, evidence: Record<string, unknown>[] }) => Promise<{ modelVersion: string, modelOutput: unknown }>} [options.executeAdmission]
+ * @param {() => string} [options.classificationRunId]
  * @param {(result: Record<string, unknown>, work: Record<string, unknown>) => Promise<void>} [options.afterExecute]
  * @param {(payload: Record<string, unknown>) => Promise<unknown>} [options.publishHealth]
  * @param {number} [options.pollIntervalMs]
@@ -235,6 +264,8 @@ export function createCompanyMonitoringWorker(options) {
     secret,
     workerId,
     executeClaim = unavailableExecutor,
+    executeAdmission,
+    classificationRunId = () => `classification-${randomUUID()}`,
     afterExecute,
     publishHealth = async () => false,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -333,6 +364,82 @@ export function createCompanyMonitoringWorker(options) {
     return outcome;
   };
 
+  const admissionTick = async () => {
+    if (stopping) return 'stopping';
+    if (typeof executeAdmission !== 'function') return 'disabled';
+
+    let claim;
+    try {
+      claim = await client.mutation(
+        anyApi.companyMonitoring.orchestration.claimNextAdmissionCandidate,
+        { secret, workerId },
+      );
+    } catch {
+      return 'claim_error';
+    }
+    if (claim?.status === 'idle') return 'idle';
+    if (
+      claim?.status !== 'claimed' ||
+      !claim.candidate ||
+      !Array.isArray(claim.evidence) ||
+      typeof claim.leaseToken !== 'string' ||
+      !Number.isSafeInteger(claim.expectedEvidenceRevision)
+    ) {
+      return 'claim_error';
+    }
+
+    inFlight = true;
+    let classification;
+    let runId;
+    try {
+      classification = await executeAdmission({
+        candidate: claim.candidate,
+        evidence: claim.evidence,
+      });
+      runId = classificationRunId();
+      if (
+        !classification ||
+        typeof classification.modelVersion !== 'string' ||
+        classification.modelVersion.length === 0 ||
+        typeof runId !== 'string' ||
+        runId.length === 0
+      ) {
+        throw new Error('Classifier returned invalid finalization metadata');
+      }
+    } catch {
+      inFlight = false;
+      return 'provider_error';
+    }
+
+    let finalized;
+    try {
+      finalized = await client.mutation(
+        anyApi.companyMonitoring.orchestration.finalizeAdmissionCandidate,
+        {
+          secret,
+          workerId,
+          leaseToken: claim.leaseToken,
+          ownerAccountId: claim.candidate.ownerAccountId,
+          companyId: claim.candidate.companyId,
+          occurrenceDedupeKey: claim.candidate.occurrenceDedupeKey,
+          expectedEvidenceRevision: claim.expectedEvidenceRevision,
+          classificationRunId: runId,
+          modelVersion: classification.modelVersion,
+          modelOutput: classification.modelOutput,
+        },
+      );
+    } catch {
+      inFlight = false;
+      return 'finalize_error';
+    }
+    inFlight = false;
+
+    if (finalized?.status === 'recorded' || finalized?.status === 'replayed') {
+      return finalized.status;
+    }
+    return 'finalize_error';
+  };
+
   const waitForNextPoll = () => new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -349,9 +456,11 @@ export function createCompanyMonitoringWorker(options) {
 
   return {
     tick,
+    admissionTick,
     async run() {
       while (!stopping) {
         await tick();
+        if (!stopping) await admissionTick();
         if (!stopping) await waitForNextPoll();
       }
     },
@@ -382,6 +491,8 @@ async function main() {
       'X_POST_STORAGE_MODE',
       'X_RECENT_SEARCH_REQUEST_COST_USD_MICROS',
       'EXA_API_KEYS',
+      'OPENROUTER_API_KEY',
+      'COMPANY_MONITORING_CLASSIFIER_MODEL',
     ],
   });
   const convexUrl = process.env.CONVEX_URL;
@@ -402,11 +513,20 @@ async function main() {
       requestCostUsdMicros: Number(process.env.X_RECENT_SEARCH_REQUEST_COST_USD_MICROS ?? 0),
     }),
   });
+  const classifierApiKey = process.env.OPENROUTER_API_KEY;
+  const classifierModel = process.env.COMPANY_MONITORING_CLASSIFIER_MODEL;
+  const executeAdmission = classifierApiKey && classifierModel
+    ? createCompanyMonitoringAdmissionClassifier({
+      apiKey: classifierApiKey,
+      model: classifierModel,
+    })
+    : undefined;
   const worker = createCompanyMonitoringWorker({
     client,
     secret,
     workerId: `railway-${process.pid}-${randomUUID()}`,
     executeClaim,
+    executeAdmission,
     publishHealth: createRedisHealthPublisher(),
   });
   let shutdownSignal = 'SIGTERM';

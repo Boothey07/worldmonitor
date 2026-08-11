@@ -7,6 +7,7 @@ import {
   COMPANY_MONITORING_WORKER_ACTIVATION_KEY,
   COMPANY_MONITORING_WORKER_HEALTH_KEY,
   COMPANY_MONITORING_WORKER_META_KEY,
+  createCompanyMonitoringAdmissionClassifier,
   createCompanyMonitoringExecutor,
   createCompanyMonitoringWorker,
   createConvexFetch,
@@ -44,6 +45,41 @@ const COMPLETE_RESULT = {
   emptyValidated: false,
   checkpoint: 'checkpoint-1',
   costUsdMicros: 12,
+};
+
+const ADMISSION_CLAIM = {
+  status: 'claimed',
+  leaseToken: 'admission-lease-1',
+  leaseExpiresAt: 1_700_000_300_000,
+  expectedEvidenceRevision: 3,
+  candidate: {
+    ownerAccountId: 'account-private',
+    companyId: 'company-private',
+    candidateId: 'candidate-1',
+    occurrenceDedupeKey: 'occurrence-1',
+    firstDiscoveredAt: 1_700_000_000_000,
+    attemptCount: 1,
+    expiresAt: 1_700_259_200_000,
+    referenceEvidenceFingerprints: ['evidence-1'],
+    referencesTruncated: false,
+    selectionPolicyVersion: 'selection-v1',
+  },
+  evidence: [{
+    ownerAccountId: 'account-private',
+    companyId: 'company-private',
+    occurrenceDedupeKey: 'occurrence-1',
+    evidenceFingerprint: 'evidence-1',
+    provider: 'exa',
+    providerLocator: 'https://example.com/story',
+    providerOriginFingerprint: 'origin-1',
+    sourceAuthority: 'independent_source',
+    independence: 'independent',
+    queryVersion: 'exa-company-discovery-v1',
+    title: 'Company signs material contract',
+    text: 'The company signed a material customer contract.',
+    publishedAt: 1_700_000_000_000,
+    observedAt: 1_700_000_060_000,
+  }],
 };
 
 function deferred() {
@@ -111,6 +147,102 @@ describe('company monitoring Railway worker', () => {
 
     assert.equal(captured.headers.get('User-Agent'), 'worldmonitor-company-monitoring-worker/1.0');
     assert.ok(captured.signal instanceof AbortSignal);
+  });
+
+  it('claims one exact admission snapshot and finalizes its untrusted model output', async () => {
+    const calls = [];
+    const rawModelOutput = '{"untrusted":"classification"}';
+    const worker = createCompanyMonitoringWorker({
+      client: convexClient([
+        ADMISSION_CLAIM,
+        { status: 'recorded', decision: 'hold' },
+      ], calls),
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      executeAdmission: async (input) => {
+        assert.equal(input.candidate, ADMISSION_CLAIM.candidate);
+        assert.equal(input.evidence, ADMISSION_CLAIM.evidence);
+        return {
+          modelVersion: 'provider/classifier-v1',
+          modelOutput: rawModelOutput,
+        };
+      },
+      classificationRunId: () => 'classification-run-1',
+      publishHealth: async () => true,
+    });
+
+    assert.equal(await worker.admissionTick(), 'recorded');
+    assert.deepEqual(calls[0], {
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+    });
+    assert.deepEqual(calls[1], {
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      leaseToken: 'admission-lease-1',
+      ownerAccountId: 'account-private',
+      companyId: 'company-private',
+      occurrenceDedupeKey: 'occurrence-1',
+      expectedEvidenceRevision: 3,
+      classificationRunId: 'classification-run-1',
+      modelVersion: 'provider/classifier-v1',
+      modelOutput: rawModelOutput,
+    });
+  });
+
+  it('leaves the admission lease unfinalized when classifier transport fails', async () => {
+    const calls = [];
+    const worker = createCompanyMonitoringWorker({
+      client: convexClient([ADMISSION_CLAIM], calls),
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      executeAdmission: async () => { throw new Error('provider unavailable'); },
+      classificationRunId: () => 'classification-run-should-not-be-used',
+      publishHealth: async () => true,
+    });
+
+    assert.equal(await worker.admissionTick(), 'provider_error');
+    assert.equal(calls.length, 1, 'provider failure must not create a policy decision');
+  });
+
+  it('does not claim admission work when classification is not configured', async () => {
+    const calls = [];
+    const worker = createCompanyMonitoringWorker({
+      client: convexClient([], calls),
+      secret: 'worker-secret',
+      workerId: 'worker-a',
+      publishHealth: async () => true,
+    });
+
+    assert.equal(await worker.admissionTick(), 'disabled');
+    assert.equal(calls.length, 0);
+  });
+
+  it('uses the configured classifier model and returns raw transport content', async () => {
+    let capturedBody;
+    const executeAdmission = createCompanyMonitoringAdmissionClassifier({
+      apiKey: 'openrouter-test-key',
+      model: 'provider/classifier-v1',
+      fetchImpl: async (_url, init) => {
+        capturedBody = JSON.parse(init.body);
+        return new Response(JSON.stringify({
+          choices: [{
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: 'not-json' },
+          }],
+        }), { status: 200 });
+      },
+    });
+
+    assert.deepEqual(await executeAdmission({
+      candidate: ADMISSION_CLAIM.candidate,
+      evidence: ADMISSION_CLAIM.evidence,
+    }), {
+      modelVersion: 'provider/classifier-v1',
+      modelOutput: 'not-json',
+    });
+    assert.equal(capturedBody.model, 'provider/classifier-v1');
+    assert.equal('tools' in capturedBody, false);
   });
 
   it('claims without accepting a tenant target and continues when Redis health is down', async () => {
