@@ -149,8 +149,26 @@ rejects every other host even if a workflow variable is misconfigured.
 | `ingestion-acceptance-production-breakglass` | Operator HMAC plus the same Viewer-only Railway access; require independent reviewers and prevent self-review |
 
 The ordinary lease-aware mutation and verifier jobs receive only their own
-HMAC roles in their separately protected environments. The Viewer token must
-not be able to deploy, redeploy, edit configuration, or approve Railway work.
+HMAC roles in their separately protected environments.
+
+The Viewer token is **read-only by convention, not by credential scope.**
+Railway issues exactly two token types and neither accepts a role or scope:
+`apiTokenCreate` takes only `{name, workspaceId}` and inherits the creating
+user's permissions, and `projectTokenCreate` takes only
+`{projectId, environmentId, name}`. The `VIEWER` value on `ProjectRole` and
+`TeamRole` applies to project *members* — user accounts — not to tokens. A
+genuinely read-only token would require a separate Railway user account joined
+to the project as a `VIEWER` member, which this project does not maintain.
+
+So mint the Viewer and deploy tokens as two distinct project tokens on the one
+owner account: distinct tokens still give independent revocation, a separate
+audit trail, and blast-radius containment if one leaks. What they do not give
+is an inability to deploy. That property is enforced instead by the
+`--workflow-authorized` fence in `scripts/trigger-railway-deploys.mjs` and the
+workflow contract tests, so treat any change to those guards as a change to a
+security boundary. Note also that `projectTokenCreate` rejects a CLI session
+with `Not Authorized`; both tokens must be created from the Railway dashboard.
+
 The protected resolver deliberately repeats the GitHub, convergence, and
 provider-inactivity reads after environment approval; the earlier proof is not
 fresh enough to authorize a state transition by itself.
