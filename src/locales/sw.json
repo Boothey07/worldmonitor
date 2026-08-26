@@ -1743,7 +1743,11 @@
       "actors": "Waigizaji",
       "deathsCount": "{{count}} vifo",
       "moreNotShown": "Matukio {{count}} zaidi hayajaonyeshwa",
-      "infoTooltip": "<strong>Matukio ya Migogoro ya Silaha</strong> Data ya migogoro kwa kiwango cha tukio kutoka Chuo Kikuu cha Uppsala (UCDP).<ul><li><strong>Ya serikali</strong>: Serikali dhidi ya kundi la waasi</li><li><strong>Yasiyo ya serikali</strong>: Kundi la silaha dhidi ya kundi la silaha</li><li><strong>Ya upande mmoja</strong>: Vurugu dhidi ya raia</li></ul>Vifo vinaonyeshwa kama makadirio bora (masafa ya chini-juu). Nakala za ACLED huchujwa kiotomatiki."
+      "infoTooltip": "<strong>Matukio ya Migogoro ya Silaha</strong> Data ya migogoro kwa kiwango cha tukio kutoka Chuo Kikuu cha Uppsala (UCDP).<ul><li><strong>Ya serikali</strong>: Serikali dhidi ya kundi la waasi</li><li><strong>Yasiyo ya serikali</strong>: Kundi la silaha dhidi ya kundi la silaha</li><li><strong>Ya upande mmoja</strong>: Vurugu dhidi ya raia</li></ul>Vifo vinaonyeshwa kama makadirio bora (masafa ya chini-juu). Nakala za ACLED huchujwa kiotomatiki.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Kielezo cha Shughuli",

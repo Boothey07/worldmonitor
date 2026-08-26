@@ -187,7 +187,9 @@
       "corporateDisclosures": "企業披露",
       "corridorConditions": "通道狀況",
       "activityNowcast": "活動即時預測",
-      "decisionSignalsUnavailable": "中國決策訊號快照當前不可用。"
+      "decisionSignalsUnavailable": "中國決策訊號快照當前不可用。",
+      "activeDisruptions_one": "{{count}} active disruption",
+      "activeSignals_one": "{{count}} active signal"
     },
     "foodStocks": "Food stocks",
     "foodStocksHelp": "USDA PSD commodity stocks-to-use by marketing year, with the world ratio alongside for context. FAOSTAT fills production only where PSD has no country coverage.",
@@ -1419,7 +1421,8 @@
       "compiledFrom": "編譯自 {{stories}} 條故事和 {{sources}} 個來源",
       "provenanceTitle": "覆蓋來源：此摘要選自多少條攝取的故事和不同的來源",
       "briefFreshness": "生成於 {{minutes}}m 前 · 最新來源 {{hours}}h 前",
-      "briefStoryDetails": "Story details ({{count}})"
+      "briefStoryDetails": "Story details ({{count}})",
+      "sources_one": "{{count}} source"
     },
     "settings": {
       "exportSettings": "匯出設定",
@@ -1599,7 +1602,11 @@
       "actors": "行為方",
       "deathsCount": "{{count}}人死亡",
       "moreNotShown": "還有{{count}}個事件未顯示",
-      "infoTooltip": "<strong>UCDP地理參考事件</strong>來自烏普薩拉大學的事件級衝突資料。<ul><li><strong>國家衝突</strong>：政府與反政府武裝</li><li><strong>非國家衝突</strong>：武裝團體之間</li><li><strong>單方暴力</strong>：針對平民的暴力</li></ul>死亡人數顯示為最佳估計（低-高範圍）。ACLED重複資料已自動過濾。"
+      "infoTooltip": "<strong>UCDP地理參考事件</strong>來自烏普薩拉大學的事件級衝突資料。<ul><li><strong>國家衝突</strong>：政府與反政府武裝</li><li><strong>非國家衝突</strong>：武裝團體之間</li><li><strong>單方暴力</strong>：針對平民的暴力</li></ul>死亡人數顯示為最佳估計（低-高範圍）。ACLED重複資料已自動過濾。",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "活動指數",
@@ -2034,12 +2041,17 @@
       "time": {
         "justNow": "剛才",
         "hoursAgo_other": "{{count}}小時前",
-        "daysAgo_other": "{{count}}天前"
+        "daysAgo_other": "{{count}}天前",
+        "hoursAgo_one": "{{count}}h ago",
+        "daysAgo_one": "{{count}}d ago"
       },
       "filters": {
         "alert_other": "{{count}} 條警報",
         "warning_other": "{{count}} 條警告",
-        "watch_other": "{{count}} 條監測"
+        "watch_other": "{{count}} 條監測",
+        "alert_one": "{{count}} Alert",
+        "warning_one": "{{count}} Warning",
+        "watch_one": "{{count}} Watch"
       },
       "errors": {
         "noData": "無可用的爆發資料",
@@ -2203,7 +2215,8 @@
       "appliesToNext": "適用於下一次AI重新生成",
       "signals_other": "{{count}}個訊號",
       "disclaimer": "AI生成的交易訊號僅供參考。非投資建議。請自行研究。",
-      "unavailable": "AI市場影響在每次預測執行後生成。請稍後檢視。"
+      "unavailable": "AI市場影響在每次預測執行後生成。請稍後檢視。",
+      "signals_one": "{{count}} signal"
     },
     "forecast": {
       "infoTooltip": "<strong>AI 預測</strong> AI 生成的地緣政治和經濟事件機率估計：<ul><li>跨域覆蓋：衝突、市場、供應鏈、網路安全、政治</li><li>每個預測顯示估計機率、置信度和時間範圍</li><li>根據預測市場基線進行校準（如可用）</li></ul>預測在新情報訊號到達時更新。使用上方標籤按域篩選。"
@@ -2436,7 +2449,8 @@
         "unattributed": "未歸屬",
         "program": "計劃",
         "undated": "無日期"
-      }
+      },
+      "designations_one": "{{count}} designation"
     },
     "radiationWatch": {
       "title": "輻射監測",
@@ -2469,7 +2483,9 @@
       },
       "observed": {
         "hoursAgo_other": "{{count}}h 前",
-        "daysAgo_other": "{{count}}d 前"
+        "daysAgo_other": "{{count}}d 前",
+        "hoursAgo_one": "{{count}}h ago",
+        "daysAgo_one": "{{count}}d ago"
       },
       "confidence": {
         "high": "高可信度",
@@ -2500,7 +2516,8 @@
       "empty": "未檢測到活躍收斂",
       "signals_other": "{{count}} 個訊號",
       "analyzing": "分析中...",
-      "viewOnMap": "在地圖上檢視"
+      "viewOnMap": "在地圖上檢視",
+      "signals_one": "{{count}} signal"
     },
     "thermalEscalation": {
       "title": "熱異常升級",
@@ -2529,8 +2546,13 @@
       "age": {
         "minutesAgo_other": "{{count}} 分鐘前",
         "hoursAgo_other": "{{count}} 小時前",
-        "daysAgo_other": "{{count}} 天前"
-      }
+        "daysAgo_other": "{{count}} 天前",
+        "minutesAgo_one": "{{count}}m ago",
+        "hoursAgo_one": "{{count}}h ago",
+        "daysAgo_one": "{{count}}d ago"
+      },
+      "observations_one": "{{count}} obs",
+      "sources_one": "{{count}} src"
     },
     "chokepointStrip": {
       "title": "瓶頸地點狀態",
