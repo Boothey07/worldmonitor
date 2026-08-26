@@ -78,7 +78,7 @@ async function runCommand(args) {
   return client.sendCommand([cmd, ...cmdArgs.map(String)]);
 }
 
-const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+const MAX_BODY_BYTES = 16 * 1024 * 1024; // 16 MB — raised from 1 MB: the wildfire seeder publishes ~14.9k detections (~2 MB) and the 1 MB cap destroyed the socket mid-write, surfacing as ECONNRESET. Proxy binds 127.0.0.1 only, so this is not an internet-facing DoS surface.
 
 async function readBody(req) {
   const chunks = [];
