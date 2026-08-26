@@ -19,8 +19,12 @@
 
 import { CHROME_UA } from './constants';
 import { getCachedJson, setCachedJson } from './redis';
+import { getAcledRelayHeaders } from './relay';
 
-const ACLED_TOKEN_URL = 'https://acleddata.com/oauth/token';
+// Overridable for the same reason as ACLED_API_URL — the token endpoint is
+// behind the same Cloudflare challenge, so the VPS cannot even mint a token.
+const ACLED_TOKEN_URL =
+  process.env.ACLED_TOKEN_URL || 'https://acleddata.com/oauth/token';
 const ACLED_CLIENT_ID = 'acled';
 
 /** Refresh 5 minutes before the token actually expires. */
@@ -61,6 +65,7 @@ async function requestAcledToken(
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': CHROME_UA,
+      ...getAcledRelayHeaders(),
     },
     body,
     signal: AbortSignal.timeout(15_000),

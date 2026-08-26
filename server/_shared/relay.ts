@@ -6,6 +6,19 @@ export function getRelayBaseUrl(): string | null {
   return relayUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/$/, '');
 }
 
+/**
+ * Headers for the ACLED egress relay.
+ *
+ * Deliberately NOT getRelayHeaders(): that helper also sets
+ * `Authorization: Bearer <relay secret>`, which would overwrite the ACLED
+ * bearer token the upstream actually needs. The relay authenticates on
+ * x-relay-key alone and strips that header before forwarding.
+ */
+export function getAcledRelayHeaders(): Record<string, string> {
+  const secret = process.env.RELAY_SHARED_SECRET;
+  return secret ? { 'x-relay-key': secret } : {};
+}
+
 export function getRelayHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',

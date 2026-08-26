@@ -8,8 +8,12 @@
 import { CHROME_UA } from './constants';
 import { cachedFetchJson } from './redis';
 import { getAcledAccessToken } from './acled-auth';
+import { getAcledRelayHeaders } from './relay';
 
-const ACLED_API_URL = 'https://acleddata.com/api/acled/read';
+// Overridable so the VPS can route via the home egress relay: Cloudflare
+// challenges the VPS IP on acleddata.com, but not the home IP.
+const ACLED_API_URL =
+  process.env.ACLED_API_URL || 'https://acleddata.com/api/acled/read';
 const ACLED_CACHE_TTL = 900; // 15 min — matches ACLED rate-limit window
 const ACLED_TIMEOUT_MS = 15_000;
 
@@ -64,6 +68,7 @@ export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRa
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
         'User-Agent': CHROME_UA,
+        ...getAcledRelayHeaders(),
       },
       signal: AbortSignal.timeout(ACLED_TIMEOUT_MS),
     });

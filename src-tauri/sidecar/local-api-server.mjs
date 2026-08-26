@@ -1936,6 +1936,14 @@ export async function createLocalApiServer(options = {}) {
         for (const envKey of ['LLM_API_URL', 'OLLAMA_API_URL']) {
           addConfiguredPrivateOrigin(envKey, 'LLM calls will be SSRF-blocked');
         }
+
+        // The ACLED egress relay lives on a tailnet address (100.64.0.0/10
+        // CGNAT), which the SSRF guard classifies as reserved. Same trust
+        // model as the Redis/LLM entries above: trust only the exact origins
+        // the operator explicitly configured.
+        for (const envKey of ['ACLED_API_URL', 'ACLED_TOKEN_URL']) {
+          addConfiguredPrivateOrigin(envKey, 'ACLED relay calls will be SSRF-blocked');
+        }
       }
       if (context.allowPrivateRemoteBase) {
         try { extraAllowedPrivateOrigins.push(new URL(context.remoteBase).origin); } catch {}
