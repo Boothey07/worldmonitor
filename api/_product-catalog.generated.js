@@ -1,4 +1,4 @@
-// AUTO-GENERATED from convex/config/productCatalog.ts and the MCP registry.
+// AUTO-GENERATED from convex/config/productCatalog.ts.
 // Do not edit manually. Run: npm run product:facts
 // @ts-check
 
@@ -41,7 +41,7 @@ export const PUBLIC_PRODUCT_FACTS = {
       "currentForCheckout": true,
       "selfServe": true,
       "dashboardAiCallsPerDay": 500,
-      "description": "Everything in Free, AI stock analysis & backtesting, Daily market briefs, Military & geopolitical tracking, Custom widget builder, 10 custom dashboards (vs 3), MCP + SDK access for Claude Desktop & other AI clients (50 calls/day), Priority data refresh, Personal license"
+      "description": "Everything in Free, AI stock analysis & backtesting, Daily market briefs, Military & geopolitical tracking, Custom widget builder, 10 custom dashboards (vs 3), MCP + SDK access for Claude Desktop & other AI clients (50 calls/day), Priority data refresh, Personal license, 1 named user"
     },
     {
       "planKey": "pro_annual",
@@ -71,7 +71,7 @@ export const PUBLIC_PRODUCT_FACTS = {
       "currentForCheckout": true,
       "selfServe": true,
       "dashboardAiCallsPerDay": 2500,
-      "description": "Everything in Pro, Use for client work, internal tools & reporting, Data export — CSV, JSON & PDF reports, 25 custom dashboards (vs 10), MCP + SDK: 250 calls/day (vs 50), Priority support, Commercial license included"
+      "description": "Everything in Pro, Use for client work, internal tools & reporting, Data export — CSV, JSON & PDF reports, 25 custom dashboards (vs 10), MCP + SDK: 250 calls/day (vs 50), Priority support, Commercial license included, 1 named user — not a shared login"
     },
     {
       "planKey": "pro_business_annual",
@@ -161,19 +161,9 @@ export const PUBLIC_PRODUCT_FACTS = {
       "currentForCheckout": false,
       "selfServe": false,
       "dashboardAiCallsPerDay": null,
-      "description": "Everything in Pro + API, Unlimited API requests, Dedicated support, Custom integrations, SLA guarantee, On-premise option"
+      "description": "Everything in Pro + API, Unlimited API requests, Dedicated support, Custom integrations, SLA guarantee, On-premise option, Data processing agreement (DPA), Purchase-order billing, SAML SSO, SCIM, Custom security and privacy settings"
     }
-  ],
-  "capabilities": {
-    "mcpTools": 60,
-    "locales": 26,
-    "variants": 6,
-    "mapLayers": 56,
-    "feedDefinitions": 632,
-    "freshnessTrackedSourceGroups": 35,
-    "sourceAttributionHosts": 531,
-    "sourceAttributionProviders": 529
-  }
+  ]
 };
 
 export const PRODUCT_CATALOG = {
@@ -262,7 +252,8 @@ export const TIER_CONFIG = {
       "Priority data refresh"
     ],
     "highlightFeatures": [
-      "Personal license"
+      "Personal license",
+      "1 named user"
     ],
     "planLimits": {
       "apiRequestsPerDay": 0,
@@ -286,7 +277,8 @@ export const TIER_CONFIG = {
       "Priority support"
     ],
     "highlightFeatures": [
-      "Commercial license included"
+      "Commercial license included",
+      "1 named user — not a shared login"
     ],
     "planLimits": {
       "apiRequestsPerDay": 0,
@@ -355,7 +347,11 @@ export const TIER_CONFIG = {
       "Dedicated support",
       "Custom integrations",
       "SLA guarantee",
-      "On-premise option"
+      "On-premise option",
+      "Data processing agreement (DPA)",
+      "Purchase-order billing",
+      "SAML SSO, SCIM",
+      "Custom security and privacy settings"
     ],
     "planLimits": {
       "apiRequestsPerDay": null,

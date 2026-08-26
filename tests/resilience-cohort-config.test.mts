@@ -8,7 +8,62 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { RESILIENCE_COHORTS, unionMembership } from './helpers/resilience-cohorts.mts';
-import { FIN_SYS_EXPOSURE_MATCHED_PAIRS, MATCHED_PAIRS } from './helpers/resilience-matched-pairs.mts';
+import {
+  FIN_SYS_EXPOSURE_MATCHED_PAIRS,
+  MATCHED_PAIRS,
+  type DimensionMatchedPair,
+} from './helpers/resilience-matched-pairs.mts';
+
+/**
+ * Pairs allowed to carry `thinAnchor` — the deliberately-thin anti-inversion
+ * anchors, as opposed to the decisive severed-vs-deep contrasts.
+ *
+ * Enumerated rather than left to the marker alone because the escape hatch's
+ * real risk is silent reclassification: a decisive pair whose gap decays gets
+ * relabelled thin instead of investigated, and no prose check can tell those
+ * two intents apart. Adding an id here is a visible edit to the gate itself.
+ */
+const SANCTIONED_THIN_ANCHORS = new Set(['gb-vs-al-finsys', 'sg-vs-al-finsys']);
+
+/**
+ * THE dimension-pair gap gate. Extracted to module scope so the gate and the
+ * mutation test that proves it can fail exercise the SAME code.
+ *
+ * The mutation test used to re-type these branches into a local closure and
+ * drive `assert.throws` against the copy, which proved the copy was armed and
+ * nothing about the gate: deleting the sanctioned-set assertion below, or
+ * tautologizing the rationale regex, left all four mutation cases green. The
+ * copy had already drifted — it omitted the decisive `minGap <= 40` arm.
+ *
+ * Throws (rather than returning a verdict) so the real gate reads as a plain
+ * assertion loop and the mutation test can wrap it in `assert.throws`.
+ */
+function assertDimensionPairGap(label: string, pair: DimensionMatchedPair): void {
+  const minGap = pair.minGap ?? 3;
+  if (pair.thinAnchor) {
+    assert.ok(
+      SANCTIONED_THIN_ANCHORS.has(pair.id),
+      `${label} pair ${pair.id} is marked thinAnchor but is not in SANCTIONED_THIN_ANCHORS — `
+        + 'add it here deliberately, or fix the construct instead of relabelling the pair',
+    );
+    assert.ok(
+      minGap >= 1 && minGap <= 5,
+      `${label} thin anchor ${pair.id} minGap=${minGap} must be 1-5 — a thin anchor needing more is a decisive pair`,
+    );
+    // Word-bounded: the unbounded /thin|close/i matched "thinly-
+    // capitalised", "closed", and "disclosure" — the DECISIVE ch-vs-mu
+    // pair's own rationale satisfied it verbatim, so the check passed
+    // for a pair it was meant to exclude.
+    assert.match(
+      pair.rationale,
+      /\bthin\b|\bclose\b/i,
+      `${label} thin anchor ${pair.id} rationale must explain why the gap is structurally thin`,
+    );
+  } else {
+    assert.ok(minGap >= 10, `${label} pair ${pair.id} minGap=${minGap} must be ≥ 10`);
+    assert.ok(minGap <= 40, `${label} pair ${pair.id} minGap=${minGap} suspiciously large`);
+  }
+}
 
 const ISO2_RE = /^[A-Z]{2}$/;
 
@@ -108,6 +163,15 @@ describe('resilience matched-pair configuration', () => {
     }
   });
 
+  it('pins the India–South Africa rebaseline to the audited pre-flip condition', () => {
+    const pair = MATCHED_PAIRS.find((candidate) => candidate.id === 'in-vs-za');
+    assert.ok(pair, 'in-vs-za pair must remain configured');
+    assert.equal(pair.minGap, 1, 'the rebaseline keeps a positive one-point directional buffer');
+    assert.match(pair.rationale, /2026-08-11/);
+    assert.match(pair.rationale, /2\.54/);
+    assert.match(pair.rationale, /1\.77/);
+  });
+
   it('pair ids are unique', () => {
     const ids = MATCHED_PAIRS.map((p) => p.id);
     const unique = new Set(ids);
@@ -185,13 +249,81 @@ describe('dimension-scoped matched-pair configuration', () => {
     // unambiguous, so it takes a wider buffer than the whole-index panel's
     // 1-5 point cushions. Below 10 the gate stops distinguishing "the
     // construct is directionally right" from "the two happen to be close".
+    //
+    // The exception is an explicit `thinAnchor` — a pair whose two
+    // jurisdictions are legitimately close (both readings genuine, the
+    // honest post-fix state IS a small gap) and which exists to pin
+    // direction against re-inversion, not separation. Those carry 1-5 and
+    // must say in their rationale why the gap is structurally thin; the
+    // marker is deliberate opt-in so the decisive default keeps its teeth.
+    //
+    // The marker is ALSO enumerated below. A prose-only gate is not a gate:
+    // the escape hatch's whole risk is that a decisive pair whose gap has
+    // decayed gets relabelled thin instead of investigated, and nothing in a
+    // rationale check can distinguish those two intents. Requiring the id
+    // here means reclassifying a pair edits the gate file itself, in a diff
+    // a reviewer sees. The companion check — that a thin anchor's OBSERVED
+    // gap really is thin — lives in the calibration test, which is where
+    // scores are actually computed.
     for (const { label, pairs } of DIMENSION_PANELS) {
       for (const pair of pairs) {
-        const minGap = pair.minGap ?? 3;
-        assert.ok(minGap >= 10, `${label} pair ${pair.id} minGap=${minGap} must be ≥ 10`);
-        assert.ok(minGap <= 40, `${label} pair ${pair.id} minGap=${minGap} suspiciously large`);
+        assertDimensionPairGap(label, pair);
       }
     }
+  });
+
+  it('the thin-anchor gate can actually fail', () => {
+    // Mutation-test the gate rather than trusting that it reads correctly:
+    // every assertion in it is only ever evaluated against compliant data, so a
+    // broken gate and a working one look identical from the passing suite. Each
+    // case below is the shape the gate exists to reject; `assert.throws` proves
+    // the branch is reachable and armed.
+    //
+    // This drives `assertDimensionPairGap` — the SAME function the gate above
+    // calls. It previously drove a hand-typed copy of those branches, which
+    // meant weakening the real gate (deleting the sanctioned-set assertion,
+    // tautologizing the rationale regex) left every case here green. Asserting
+    // on the real function is what makes this a mutation test.
+    const base = {
+      dimension: 'financialSystemExposure',
+      higherExpected: 'GB',
+      lowerExpected: 'AL',
+      axis: 'test',
+    };
+    const check = (pair: DimensionMatchedPair) => assertDimensionPairGap('mutation', pair);
+
+    assert.throws(
+      () => check({ ...base, id: 'not-sanctioned', rationale: 'structurally thin', thinAnchor: true, minGap: 2 }),
+      /not in SANCTIONED_THIN_ANCHORS/,
+      'an unsanctioned id marked thinAnchor must be rejected',
+    );
+    assert.throws(
+      () => check({ ...base, id: 'gb-vs-al-finsys', rationale: 'structurally thin', thinAnchor: true, minGap: 6 }),
+      /must be 1-5/,
+      'a thin anchor claiming a decisive-sized gap must be rejected',
+    );
+    assert.throws(
+      () => check({ ...base, id: 'gb-vs-al-finsys', rationale: 'no justification here', thinAnchor: true, minGap: 2 }),
+      /rationale must explain why the gap is structurally thin/,
+      'a thin anchor with no thinness rationale must be rejected',
+    );
+    assert.throws(
+      () => check({ ...base, id: 'decisive-pair', rationale: 'thinly-capitalised intermediation', minGap: 3 }),
+      /must be ≥ 10/,
+      'the decisive default must still demand >= 10',
+    );
+    // The arm the hand-typed copy had silently dropped.
+    assert.throws(
+      () => check({ ...base, id: 'decisive-pair', rationale: 'severed vs deep', minGap: 41 }),
+      /suspiciously large/,
+      'the decisive upper bound must also be armed',
+    );
+
+    // ...and the honest shapes pass, so the gate is not simply always-throwing.
+    assert.doesNotThrow(() =>
+      check({ ...base, id: 'sg-vs-al-finsys', rationale: 'the state IS close', thinAnchor: true, minGap: 1 }));
+    assert.doesNotThrow(() =>
+      check({ ...base, id: 'decisive-pair', rationale: 'severed vs deep', minGap: 10 }));
   });
 
   it('dimension pair ids are unique within their panel', () => {

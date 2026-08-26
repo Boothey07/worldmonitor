@@ -335,14 +335,18 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     description: 'BIS CBS (WS_CBS_PUB) sum of by-parent foreign claims (US/UK/major-EU/CH/JP/CA/AU/SG) as % of GDP; asymmetric U-shape band — isolation (0%) is the worst reading, over-exposure (>60%) is penalized but floors above it',
     direction: 'lowerBetter', // U-shape is "lowerBetter" in semantic sense (concentrated exposure penalized)
     // NOTE (Greptile P2 catch, PR #3407 review): goalposts here are
-    // DOCUMENTATION-ONLY. The actual scorer uses `normalizeBandLowerBetter`
-    // (a U-shape, not a linear lowerBetter mapping), which peaks at 25% and
-    // penalizes both extremes. A linear `{worst, best}` cannot represent a
-    // U-shape; we set goalposts to the peak (best=25) and the worst reading
-    // the band can produce. Tooling / lints that read these values to compute
-    // "expected" component scores must consult `normalizeBandLowerBetter`
-    // directly, not assume these are the inputs to a generic linear
-    // normalizer.
+    // DOCUMENTATION-ONLY. The actual scorer uses
+    // `normalizeDiversityConditionedBand` — the U-shape
+    // `normalizeBandLowerBetter` (peaks at 25%, penalizes both extremes) with
+    // its premium above 75 scaled by `normalizeHigherBetter(parentCount, 1,
+    // 10) / 100`. A linear `{worst, best}` cannot represent a U-shape, let
+    // alone a two-input one; we set goalposts to the peak (best=25) and the
+    // worst reading the band can produce. Tooling / lints that read these
+    // values to compute "expected" component scores must consult
+    // `normalizeDiversityConditionedBand` directly — assuming a generic
+    // linear normalizer, or even the raw band, overstates concentrated
+    // integrators by up to the full premium (Albania: raw 91 vs the 77 the
+    // blend actually consumes).
     //
     // #6459: the worst anchor moved from 60 (over-exposure) to 0 (isolation).
     // The band used to floor 0% claims at 60 while decaying over-integration
@@ -351,7 +355,7 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     goalposts: { worst: 0, best: 25 },
     normalization: {
       kind: 'uShape',
-      disclaimer: 'normalizeBandLowerBetter peaks around diversified middle exposure and penalizes both extremes asymmetrically: isolation floors at 30, over-exposure floors at 35. goalposts name the worst (isolation) and best (sweet-spot peak) readings only.',
+      disclaimer: 'normalizeDiversityConditionedBand wraps normalizeBandLowerBetter: the U-shape peaks around diversified middle exposure and penalizes both extremes asymmetrically (isolation floors at 30, over-exposure at 35), then the premium above 75 is scaled by reporting-parent redundancy so integration level alone cannot earn the sweet-spot score. goalposts name the worst (isolation) and best (sweet-spot peak) readings only.',
     },
     weight: 0.30,
     sourceKey: 'economic:bis-lbs:v1',
@@ -979,17 +983,25 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     sourceKey: 'resilience:education-attainment:v1',
     scope: 'global',
     cadence: 'annual',
-    // Stays `experimental` while RESILIENCE_EDUCATION_ENABLED is off. That
-    // keeps it out of the per-dimension weight-sum invariant AND the
-    // coverage-influence gate, both of which filter on tier.
+    // Promoted to `core` at the 2026-08-11 activation (#6460), which puts it
+    // into both the per-dimension weight-sum invariant and the
+    // coverage-influence gate — neither of which exercised it at
+    // `experimental`.
     //
-    // The binding floor at promotion is CORE_MIN_COVERAGE = 180 in
+    // The binding floor is CORE_MIN_COVERAGE = 180 in
     // `tests/resilience-indicator-tiering.test.mts`, NOT the 137 in the
     // coverage-influence gate — that gate only flags indicators whose nominal
-    // weight also exceeds 5%, and this one sits at 3.8%, so it would pass at
-    // any coverage. Measured coverage is 181: promotion clears the real floor
-    // by one country. Re-measure before promoting.
-    tier: 'experimental',
+    // weight also exceeds 5%, and this one sits at 3.8%, so it passes at any
+    // coverage and provides no assurance here.
+    //
+    // Coverage RE-MEASURED immediately before this promotion (2026-08-11,
+    // against the live `resilience:education-attainment:v1` payload and
+    // `scripts/shared/sovereign-status.json`): 189 records, **181 in-universe**.
+    // The 15 absent are BB, ER, GA, GQ, KG, KN, KP, LI, LY, MC, SS, ST, SY, TW,
+    // VC. That clears the floor by exactly one country, so this margin is not
+    // hypothetical — if the World Bank drops two reporters, promotion fails CI.
+    // Re-measure again before any future change here rather than trusting 181.
+    tier: 'core',
     coverage: 181,
     license: 'open-attribution',
     comprehensive: true,

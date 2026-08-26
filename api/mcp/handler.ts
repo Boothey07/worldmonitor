@@ -2,10 +2,12 @@
 import { getPublicCorsHeaders } from '../_cors.js';
 import {
   applyAnonDiscoveryLimit,
+  applyFreeTierLimit,
   applyPerMinuteLimit,
   PRODUCTION_DEPS,
   resolveAuthContext,
   runContextPreChecks,
+  validateProMcpAuthorization,
   wwwAuthHeader,
 } from './auth';
 import {
@@ -17,10 +19,13 @@ import {
 } from './constants';
 import { dispatchToolsCall } from './dispatch';
 import { buildPromptResponse, PROMPT_LIST_RESPONSE } from './prompts/index';
-import { TOOL_LIST_BYTES, TOOL_LIST_RESPONSE } from './registry/index';
+import { FREE_TIER_TOOL_NAMES, TOOL_LIST_BYTES, TOOL_LIST_RESPONSE } from './registry/index';
 import {
+  ACCOUNT_RESOURCE_LIST_RESPONSE,
+  buildAccountAllowanceResourceResponse,
   buildPublicResourceResponse,
   buildResourceResponse,
+  isAccountResourceUri,
   isPublicResourceUri,
   RESOURCE_LIST_RESPONSE,
   RESOURCE_TEMPLATE_LIST_RESPONSE,
@@ -29,6 +34,7 @@ import { rpcError, rpcOk, withMcpNoStore } from './rpc';
 import { buildUiResourceRead, isUiResourceUri, UI_RESOURCE_LIST_RESPONSE } from './ui/registry';
 import { emitTelemetry, principalIdForLog } from './telemetry';
 import { createMcpUsage, emitMcpRequestEvent, setUsageContext, type McpUsage } from './usage';
+import { utf8ByteLength } from './utils';
 import type { McpAuthContext, McpHandlerDeps } from './types';
 
 // MCP methods servable WITHOUT authentication. These are the zero-data
@@ -54,9 +60,19 @@ import type { McpAuthContext, McpHandlerDeps } from './types';
 // a PUBLIC resource (a concrete, metadata-only freshness/health probe — see
 // PUBLIC_RESOURCE_REGISTRY) is ALSO anonymously servable + quota-exempt; it
 // is promoted to the public path per-request via `isPublicResourceUri` below
-// because it carries no billable data. Everything that returns DATA or spends
-// quota (`tools/call`, and `resources/read` of a data-bearing TEMPLATE
-// instantiation) still requires credentials. `notifications/initialized`
+// because it carries no billable data.
+//
+// U7 narrowed the old blanket rule ("everything returning DATA requires
+// credentials"): a `tools/call` naming a tool flagged `_freeTier` in the
+// registry is ALSO promoted per-request, and runs under an explicit
+// `{ kind: 'free' }` principal with no identity and no quota. The narrowing is
+// bounded three ways — the roster is the registry flag itself (no second
+// list), `dispatchToolsCall` re-checks that flag so promotion and
+// authorisation are not one line of code, and the free path takes a
+// fail-CLOSED ceiling rather than the fail-open discovery limiter. Everything
+// else that returns DATA or spends quota (every non-roster `tools/call`, and
+// `resources/read` of a data-bearing TEMPLATE instantiation) still requires
+// credentials. `notifications/initialized`
 // is the client's post-`initialize` handshake notification (carries no data);
 // leaving it public lets a strict MCP client complete the handshake before
 // calling `tools/list`.
@@ -81,6 +97,19 @@ function hasCredentials(req: Request): boolean {
   return (req.headers.get('X-WorldMonitor-Key') ?? '') !== '';
 }
 
+type JsonRpcRequest = {
+  jsonrpc?: string;
+  id?: unknown;
+  method?: string;
+  params?: unknown;
+};
+
+function validJsonRpcId(id: unknown): id is string | number | null | undefined {
+  if (id === null || id === undefined) return true;
+  if (typeof id === 'number') return Number.isFinite(id);
+  return typeof id === 'string' && utf8ByteLength(id) <= MAX_JSON_RPC_ID_BYTES;
+}
+
 // Spec-correct 401 for the fail-closed guards on data methods. These guards are
 // unreachable today (tools/call always runs the gated path, and a data-bearing
 // resources/read reaches its `!context` guard only AFTER the public-read branch
@@ -100,14 +129,30 @@ type StoredSseEvent = {
   data: string;
 };
 
+type StoredSseStream = {
+  events: StoredSseEvent[];
+  bytes: number;
+};
+
 const SSE_CONTENT_TYPE = 'text/event-stream; charset=utf-8';
 // no-store forbids storage outright; no-cache is vacuous alongside it (RFC 9111
 // §5.2) so it is omitted. no-transform is load-bearing for SSE framing. This also
 // matches the sibling no-store work in api/mcp/rpc.ts (#4502).
 const MCP_CACHE_CONTROL = 'no-store, no-transform';
+// JSON-RPC IDs are client-controlled and get echoed in every success/error
+// envelope. Keep ordinary scalar IDs correlatable, but reject IDs that could
+// turn an error path (and its optional SSE replay) into an amplification sink.
+const MAX_JSON_RPC_ID_BYTES = 256;
+// Replay is a best-effort convenience for a stateless edge route. A large
+// response still reaches the current SSE client; it is not retained for a
+// later Last-Event-ID replay.
+const MAX_SSE_REPLAY_RESPONSE_BYTES = 128 * 1024;
+const MAX_SSE_REPLAY_SESSION_BYTES = 256 * 1024;
+const MAX_SSE_REPLAY_TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_SSE_SESSIONS = 500;
 const MAX_SSE_STREAMS_PER_SESSION = 25;
-const mcpSseStreamsBySession = new Map<string, Map<string, StoredSseEvent[]>>();
+const mcpSseStreamsBySession = new Map<string, Map<string, StoredSseStream>>();
+let mcpSseReplayBytes = 0;
 
 function getMcpCorsHeaders(methods = 'POST, GET, HEAD, OPTIONS'): Record<string, string> {
   return {
@@ -163,27 +208,68 @@ function createSseStream(events: StoredSseEvent[]): ReadableStream<Uint8Array> {
   });
 }
 
-function sessionStreamsForWrite(sessionId: string): Map<string, StoredSseEvent[]> {
+function deleteSseSession(sessionId: string): void {
+  const streams = mcpSseStreamsBySession.get(sessionId);
+  if (!streams) return;
+  for (const stream of streams.values()) mcpSseReplayBytes -= stream.bytes;
+  mcpSseStreamsBySession.delete(sessionId);
+}
+
+function sessionReplayBytes(streams: Map<string, StoredSseStream>): number {
+  let bytes = 0;
+  for (const stream of streams.values()) bytes += stream.bytes;
+  return bytes;
+}
+
+function evictOldestSseStream(exceptSessionId?: string): boolean {
+  for (const [sessionId, streams] of mcpSseStreamsBySession) {
+    if (sessionId === exceptSessionId) continue;
+    const streamId = streams.keys().next().value;
+    if (!streamId) continue;
+    const stream = streams.get(streamId);
+    if (!stream) continue;
+    streams.delete(streamId);
+    mcpSseReplayBytes -= stream.bytes;
+    if (streams.size === 0) mcpSseStreamsBySession.delete(sessionId);
+    return true;
+  }
+  return false;
+}
+
+function sessionStreamsForWrite(sessionId: string): Map<string, StoredSseStream> {
   let streams = mcpSseStreamsBySession.get(sessionId);
   if (!streams) {
     streams = new Map();
     mcpSseStreamsBySession.set(sessionId, streams);
     if (mcpSseStreamsBySession.size > MAX_SSE_SESSIONS) {
       const oldestSessionId = mcpSseStreamsBySession.keys().next().value;
-      if (oldestSessionId) mcpSseStreamsBySession.delete(oldestSessionId);
+      if (oldestSessionId) deleteSseSession(oldestSessionId);
     }
   }
   return streams;
 }
 
-function storeSseStream(sessionId: string, streamId: string, events: StoredSseEvent[]) {
+function storeSseStream(sessionId: string, streamId: string, events: StoredSseEvent[]): boolean {
+  const bytes = events.reduce((total, event) => total + utf8ByteLength(formatSseEvent(event)), 0);
+  if (bytes > MAX_SSE_REPLAY_RESPONSE_BYTES) return false;
+
   const streams = sessionStreamsForWrite(sessionId);
-  streams.set(streamId, events);
-  while (streams.size > MAX_SSE_STREAMS_PER_SESSION) {
+  while (
+    streams.size >= MAX_SSE_STREAMS_PER_SESSION
+    || sessionReplayBytes(streams) + bytes > MAX_SSE_REPLAY_SESSION_BYTES
+  ) {
     const oldestStreamId = streams.keys().next().value;
     if (!oldestStreamId) break;
+    const oldest = streams.get(oldestStreamId);
     streams.delete(oldestStreamId);
+    if (oldest) mcpSseReplayBytes -= oldest.bytes;
   }
+  while (mcpSseReplayBytes + bytes > MAX_SSE_REPLAY_TOTAL_BYTES && evictOldestSseStream(sessionId)) {
+    // Evict least-recently-stored entries until this bounded replay fits.
+  }
+  streams.set(streamId, { events, bytes });
+  mcpSseReplayBytes += bytes;
+  return true;
 }
 
 function parseEventCursor(eventId: string): { streamId: string; sequence: number } | null {
@@ -197,9 +283,9 @@ function parseEventCursor(eventId: string): { streamId: string; sequence: number
 function replayEventsAfter(sessionId: string, lastEventId: string): StoredSseEvent[] | null {
   const cursor = parseEventCursor(lastEventId);
   if (!cursor) return null;
-  const events = mcpSseStreamsBySession.get(sessionId)?.get(cursor.streamId);
-  if (!events) return null;
-  return events.slice(cursor.sequence + 1);
+  const stream = mcpSseStreamsBySession.get(sessionId)?.get(cursor.streamId);
+  if (!stream) return null;
+  return stream.events.slice(cursor.sequence + 1);
 }
 
 function sseHeadersFrom(headers: Headers): Headers {
@@ -598,17 +684,27 @@ async function mcpHandlerInner(
   // (public discovery methods are servable anonymously). Malformed/missing-method
   // POSTs are a client error regardless of auth, so returning -32600 here (rather
   // than 401-then-32600) leaks nothing.
-  let body: { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
+  let body: JsonRpcRequest;
   try {
-    body = await req.json();
+    const parsed: unknown = await req.json();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      usage.phase = 'malformed';
+      return rpcError(null, -32600, 'Invalid request: expected object', corsHeaders);
+    }
+    body = parsed as JsonRpcRequest;
   } catch {
     usage.phase = 'malformed';
     return rpcError(null, -32600, 'Invalid request: malformed JSON', corsHeaders);
   }
 
-  if (!body || typeof body.method !== 'string') {
+  if (!validJsonRpcId(body.id)) {
     usage.phase = 'malformed';
-    return rpcError(body?.id ?? null, -32600, 'Invalid request: missing method', corsHeaders);
+    return rpcError(null, -32600, 'Invalid request: invalid id', corsHeaders);
+  }
+
+  if (typeof body.method !== 'string') {
+    usage.phase = 'malformed';
+    return rpcError(body.id ?? null, -32600, 'Invalid request: missing method', corsHeaders);
   }
 
   const { id, method } = body;
@@ -632,7 +728,19 @@ async function mcpHandlerInner(
     ? resourceReadUri
     : null;
   const isPublicResourceRead = typeof resourceReadUri === 'string' && isPublicResourceUri(resourceReadUri);
+  const isAccountResourceRead = typeof resourceReadUri === 'string' && isAccountResourceUri(resourceReadUri);
   const isAnonResourceRead = uiResourceReadUri !== null || isPublicResourceRead;
+
+  // U7 (R7, R9): a `tools/call` naming a tool in the always-free subset is
+  // promoted to the anonymous path per-request, the same shape
+  // `isPublicResourceUri` already uses for metadata-only resource reads.
+  // Exact-matched against the registry's own `_freeTier` flag, so a tool
+  // outside the roster is never promoted and stays fully gated.
+  const toolCallName = method === 'tools/call'
+    ? ((body.params as { name?: unknown } | null)?.name)
+    : undefined;
+  const isFreeTierToolCall = typeof toolCallName === 'string'
+    && FREE_TIER_TOOL_NAMES.has(toolCallName);
 
   // Auth gate. `context` is null only on the anonymous discovery path; every
   // data/quota method below runs the full protected path and always sets it.
@@ -640,39 +748,71 @@ async function mcpHandlerInner(
   // Set alongside `context` by the gated branch's pre-check. Stays undefined on
   // the public/anon branch — which never reaches a metered dispatch anyway.
   let mcpDailyLimit: number | null | undefined;
-  if (PUBLIC_MCP_METHODS.has(method) || isAnonResourceRead) {
+  let freeAccountAllowance = false;
+  if (PUBLIC_MCP_METHODS.has(method) || isAnonResourceRead || isFreeTierToolCall) {
     if (hasCredentials(req)) {
       // Credentials presented on a public method are still validated so a
       // present-but-invalid key surfaces a 401 instead of a silent anon
       // downgrade; a valid principal is attributed for telemetry + limits.
-      const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
+      const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders, id);
       if (!auth.ok) {
         usage.phase = 'auth';
         return auth.response;
       }
       context = auth.context;
       setUsageContext(usage, context);
+      // A bearer-derived Pro context is not authoritative revocation proof.
+      // Validate the durable grant before assigning the larger credentialed
+      // per-user bucket on any public method. Free tools and metadata methods
+      // remain entitlement- and daily-quota-exempt after this identity check.
+      if (context.kind === 'pro') {
+        const validation = await validateProMcpAuthorization(
+          context,
+          deps,
+          resourceMetadataUrl,
+          corsHeaders,
+          ctx,
+          id,
+        );
+        if (!validation.ok) {
+          usage.phase = 'precheck';
+          return validation.response;
+        }
+      }
       const limited = await applyPerMinuteLimit(context, corsHeaders);
       if (limited) {
         usage.phase = 'limit';
         return limited;
       }
     } else {
-      const anonLimited = await applyAnonDiscoveryLimit(req, corsHeaders);
+      // A free-tier tool call returns DATA, so it takes the tighter
+      // fail-CLOSED ceiling instead of the discovery limiter, whose fail-OPEN
+      // is justified only by carrying no data. Metadata methods keep the
+      // existing limiter unchanged.
+      const anonLimited = isFreeTierToolCall
+        ? await applyFreeTierLimit(req, corsHeaders, id)
+        : await applyAnonDiscoveryLimit(req, corsHeaders);
       if (anonLimited) {
         usage.phase = 'limit';
         return anonLimited;
       }
+      // The free-tier caller dispatches as an explicit `free` principal: no
+      // identity, no quota, and `buildAuthHeaders` throws if a tool tries to
+      // reach a credentialed downstream with it.
+      if (isFreeTierToolCall) {
+        context = { kind: 'free' };
+        setUsageContext(usage, context);
+      }
     }
   } else {
-    const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
+    const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders, id);
     if (!auth.ok) {
       usage.phase = 'auth';
       return auth.response;
     }
     context = auth.context;
     setUsageContext(usage, context);
-    const preCheck = await runContextPreChecks(context, deps, resourceMetadataUrl, corsHeaders, ctx);
+    const preCheck = await runContextPreChecks(context, deps, resourceMetadataUrl, corsHeaders, ctx, id);
     if (!preCheck.ok) {
       usage.phase = preCheck.response.headers.get('X-Billing-Verification') ? 'billing' : 'precheck';
       return preCheck.response;
@@ -681,6 +821,7 @@ async function mcpHandlerInner(
     // already fetched (plan 2026-07-25-001 U3). Carried to the two metered
     // dispatch sites below; unset for every caller class but `pro`.
     mcpDailyLimit = preCheck.mcpDailyLimit;
+    freeAccountAllowance = preCheck.freeAccountAllowance === true;
     const limited = await applyPerMinuteLimit(context, corsHeaders);
     if (limited) {
       usage.phase = 'limit';
@@ -741,13 +882,25 @@ async function mcpHandlerInner(
     case 'tools/list':
       return maybeStreamJsonRpcResponse(req, rpcOk(id, { tools: TOOL_LIST_RESPONSE }, corsHeaders));
     case 'tools/call': {
-      // context is always set here — tools/call is never a PUBLIC_MCP_METHOD.
+      // context is always set here. tools/call is never a PUBLIC_MCP_METHOD, and
+      // since U7 a free-tier call takes the anon branch above but still sets an
+      // explicit `{ kind: 'free' }` principal rather than leaving context null.
       // The guard narrows the type and hard-fails closed if that ever changes.
       if (!context) {
         usage.phase = 'auth';
         return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
       }
-      const dispatched = await dispatchToolsCall(req, context, deps, body, corsHeaders, ctx, mcpDailyLimit);
+      const dispatched = await dispatchToolsCall(
+        req,
+        context,
+        deps,
+        body,
+        corsHeaders,
+        ctx,
+        mcpDailyLimit,
+        freeAccountAllowance,
+        resourceMetadataUrl,
+      );
       // Mid-call billing denials (dispatch's BillingDenialError re-emit) must
       // classify like the pre-check sites: 'billing' -> billing_verification_503
       // / tier_403, not rate_limit_degraded (503) or 'ok' (403).
@@ -755,6 +908,15 @@ async function mcpHandlerInner(
         usage.phase = 'billing';
       } else if (dispatched.status === 429 || dispatched.status === 503) {
         usage.phase = 'dispatch';
+      } else if (dispatched.status === 401 || dispatched.status === 403) {
+        // #6716 F4: dispatch can now emit a tier denial of its own (the
+        // free-tier fail-closed guard at 401, and the gateway-backed
+        // upgrade-required at 403). Without this arm both fall past every
+        // branch, keep usage.phase's 'ok' default, and get recorded as
+        // SERVED — deleting from the dataset exactly the denial events this
+        // funnel exists to measure. 'precheck' maps a non-503 status to
+        // tier_403, matching how the pre-check sites classify the same verdict.
+        usage.phase = 'precheck';
       }
       return maybeStreamJsonRpcResponse(req, dispatched);
     }
@@ -790,7 +952,15 @@ async function mcpHandlerInner(
       // data-bearing URI templates are surfaced separately via
       // resources/templates/list (a literal `{iso2}` URI can't resolve, so it
       // must not appear in a list an anonymous validator reads back).
-      return maybeStreamJsonRpcResponse(req, rpcOk(id, { resources: [...RESOURCE_LIST_RESPONSE, ...UI_RESOURCE_LIST_RESPONSE] }, corsHeaders));
+      return maybeStreamJsonRpcResponse(req, rpcOk(id, {
+        resources: [
+          ...RESOURCE_LIST_RESPONSE,
+          ...UI_RESOURCE_LIST_RESPONSE,
+          ...(context?.kind === 'pro' || context?.kind === 'user_key'
+            ? ACCOUNT_RESOURCE_LIST_RESPONSE
+            : []),
+        ],
+      }, corsHeaders));
     case 'resources/templates/list':
       return maybeStreamJsonRpcResponse(req, rpcOk(id, { resourceTemplates: RESOURCE_TEMPLATE_LIST_RESPONSE }, corsHeaders));
     case 'resources/read':
@@ -806,6 +976,25 @@ async function mcpHandlerInner(
       if (isPublicResourceRead) {
         return maybeStreamJsonRpcResponse(req, await buildPublicResourceResponse(body, corsHeaders));
       }
+      // Account allowance status is authenticated but quota-exempt. The gated
+      // branch above already resolved identity, durable token validity, and the
+      // entitlement/meter selection. Read the same Redis keys as enforcement;
+      // do not route through dispatchToolsCall, which would spend a call merely
+      // to ask how many calls remain.
+      if (isAccountResourceRead) {
+        if (!context) {
+          usage.phase = 'auth';
+          return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
+        }
+        return maybeStreamJsonRpcResponse(req, await buildAccountAllowanceResourceResponse(
+          context,
+          deps,
+          body,
+          corsHeaders,
+          mcpDailyLimit,
+          freeAccountAllowance,
+        ));
+      }
       // A data-bearing TEMPLATE instantiation MUST consume the Pro daily quota
       // IDENTICALLY to a tools/call to the equivalent tool. Asymmetric auth
       // here is a known MCP data-leak vector (a Pro user at the daily cap could
@@ -819,8 +1008,25 @@ async function mcpHandlerInner(
         return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
       }
       {
-        const resourceRes = await buildResourceResponse(req, context, deps, body, corsHeaders, ctx, mcpDailyLimit);
-        if (resourceRes.status === 429 || resourceRes.status === 503) usage.phase = 'dispatch';
+        const resourceRes = await buildResourceResponse(
+          req,
+          context,
+          deps,
+          body,
+          corsHeaders,
+          ctx,
+          mcpDailyLimit,
+          freeAccountAllowance,
+          resourceMetadataUrl,
+        );
+        if (resourceRes.status === 429 || resourceRes.status === 503) {
+          usage.phase = 'dispatch';
+        } else if (resourceRes.status === 401 || resourceRes.status === 403) {
+          // Mirror of the tools/call classification above (#6716 F4) — a
+          // resources/read routes through the same dispatcher and can emit the
+          // same tier denials.
+          usage.phase = 'precheck';
+        }
         return maybeStreamJsonRpcResponse(req, resourceRes);
       }
     case 'logging/setLevel': {
@@ -834,7 +1040,10 @@ async function mcpHandlerInner(
       return maybeStreamJsonRpcResponse(req, rpcOk(id, {}, corsHeaders));
     }
     default:
-      return maybeStreamJsonRpcResponse(req, rpcError(id, -32601, `Method not found: ${method}`, corsHeaders));
+      // Cap the echoed method name — an arbitrarily long one would otherwise
+      // be reflected verbatim into the pre-auth error body (bandwidth
+      // amplification). Mirrors the a2a.ts cap (Greptile #4824).
+      return maybeStreamJsonRpcResponse(req, rpcError(id, -32601, `Method not found: ${method.slice(0, 100)}`, corsHeaders));
   }
 }
 

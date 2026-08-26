@@ -16,6 +16,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import middleware from '../middleware';
+import { WEB_DASHBOARD_VARIANTS } from '../src/config/variant-dashboard-html';
+import { VARIANT_META } from '../src/config/variant-meta';
 
 const TELEGRAM_BOT_UA = 'TelegramBot (like TwitterBot)';
 const SLACKBOT_UA = 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)';
@@ -49,6 +51,23 @@ function call(pathOrUrl: string, ua: string, headers: Record<string, string> = {
   });
   return middleware(req) as Response | void;
 }
+
+describe('middleware AI crawler variant stub', () => {
+  it('links every web-served variant dashboard', async () => {
+    const res = call('https://tech.worldmonitor.app/', 'Mozilla/5.0 GPTBot/1.1');
+    assert.ok(res instanceof Response);
+    assert.equal(res.status, 200);
+
+    const html = await res.text();
+    for (const variant of WEB_DASHBOARD_VARIANTS) {
+      const { siteName: name, url: dashboardUrl } = VARIANT_META[variant];
+      assert.ok(
+        html.includes(`<li><a href="${dashboardUrl}">${name}</a></li>`),
+        `AI crawler stub must link the ${variant} dashboard`,
+      );
+    }
+  });
+});
 
 describe('middleware bot gate / keyed API clients', () => {
   const KEYED_API_PATH = '/api/forecast/v1/get-forecast-scorecard';
@@ -192,6 +211,7 @@ describe('middleware PUBLIC_API_PATHS — secret-authed internal endpoints bypas
     '/api/internal/brief-why-matters',
     '/api/llms.txt',
     '/api/product-catalog',
+    '/api/download.md',
   ];
 
   for (const path of ALLOWED_PATHS) {
@@ -251,6 +271,64 @@ describe('middleware /api/llms.txt — AI crawlers reach the agent-discovery fil
 
   it('still 403s a crawler on a sibling /api path (bypass is exact, not a prefix)', () => {
     const res = call('/api/llms', 'CCBot/2.0 (https://commoncrawl.org/faq/)');
+    assert.ok(res instanceof Response);
+    assert.equal(res.status, 403);
+  });
+});
+
+// ── /api/download.md markdown-URL-fallback bypass ────────────────────────────
+// Homepage download badges are sampled as a "content page". Agent-readiness
+// scanners then request /api/download.md. The twin is a static file under
+// public/api/, so it lives in the /api/* namespace where BOT_UA 403s crawlers
+// unless this path is on PUBLIC_API_PATHS.
+
+describe('middleware /api/download.md — markdown-URL-fallback crawlers reach the twin', () => {
+  const CRAWLER_UAS = [
+    { label: 'ClaudeBot', ua: 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' },
+    { label: 'python-requests', ua: 'python-requests/2.31' },
+    { label: 'curl UA', ua: 'curl/8.7.1' },
+    { label: 'empty UA', ua: '' },
+  ];
+
+  for (const { label, ua } of CRAWLER_UAS) {
+    it(`passes ${label} through to /api/download.md`, () => {
+      const res = call('/api/download.md', ua);
+      assert.equal(res, undefined, '/api/download.md must pass through the bot gate for markdown-fallback crawlers');
+    });
+  }
+
+  it('still 403s a crawler on GET /api/download (bypass is exact, not a prefix)', () => {
+    const res = call('/api/download', 'CCBot/2.0 (https://commoncrawl.org/faq/)');
+    assert.ok(res instanceof Response);
+    assert.equal(res.status, 403);
+  });
+});
+
+// The protocol is site-wide `/{page}` → `/{page}.md`, not one sampled URL.
+// GET/HEAD /api/**/*.md must pass the bot gate; POST must not inherit that bypass.
+describe('middleware /api/*.md — site-wide markdown URL-fallback twins bypass the bot gate', () => {
+  const CRAWLER_UAS = [
+    { label: 'ClaudeBot', ua: 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' },
+    { label: 'python-requests', ua: 'python-requests/2.31' },
+    { label: 'empty UA', ua: '' },
+  ];
+
+  for (const path of ['/api/health.md', '/api/v1/foo.md', '/api/download.md']) {
+    for (const { label, ua } of CRAWLER_UAS) {
+      it(`passes ${label} through to GET ${path}`, () => {
+        const res = call(path, ua);
+        assert.equal(res, undefined, `${path} must pass through the bot gate for markdown-fallback crawlers`);
+      });
+    }
+  }
+
+  it('still 403s a crawler on POST /api/health.md (bypass is GET/HEAD only)', () => {
+    const url = 'https://www.worldmonitor.app/api/health.md';
+    const req = new Request(url, {
+      method: 'POST',
+      headers: { 'user-agent': 'CCBot/2.0 (https://commoncrawl.org/faq/)' },
+    });
+    const res = middleware(req);
     assert.ok(res instanceof Response);
     assert.equal(res.status, 403);
   });

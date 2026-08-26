@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
 const DEFAULT_HEALTH_URL = 'https://api.worldmonitor.app/api/health?compact=1';
 const BASELINE_URL = new URL('./seed-freshness-baseline.json', import.meta.url);
+// api/health.js only serves a cached verdict for 60 seconds. Allow its maximum
+// 20-second request timeout too, so a valid snapshot cannot be rejected solely
+// because the response arrived at the end of the monitor's fetch window.
+export const MAX_HEALTH_OBSERVATION_AGE_MS = 80 * 1000;
 
 export function validateCompactHealthPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -82,6 +87,17 @@ export function findOperationalProblems(payload, now = Date.now()) {
       ...(Number.isFinite(problem?.maxStaleMin)
         ? { maxStaleMin: problem.maxStaleMin }
         : {}),
+      // The content clock, carried so the report can name the pair that
+      // actually fired. Without these a STALE_CONTENT line could only print
+      // the SEED pair, which is by definition inside budget for that status —
+      // the reader sees `age=1200m max=5760m` on a problem row and reasonably
+      // concludes the monitor is broken.
+      ...(Number.isFinite(problem?.contentAgeMin)
+        ? { contentAgeMin: problem.contentAgeMin }
+        : {}),
+      ...(Number.isFinite(problem?.maxContentAgeMin)
+        ? { maxContentAgeMin: problem.maxContentAgeMin }
+        : {}),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -142,6 +158,15 @@ export function validateAcceptanceBaseline(baseline) {
       && !isUtcIsoInstant(entry.expiresAt)
     ) {
       throw new Error(`Acknowledged baseline entry ${entry.name} needs a valid UTC ISO expiresAt instant`);
+    }
+    // Optional rejection cohort: when present it must be a non-empty list of
+    // non-empty strings, or the cohort guard in applyAcceptanceBaseline would
+    // silently scope the acknowledgment to nothing.
+    if (Object.hasOwn(entry, 'rejectedShas')
+      && (!Array.isArray(entry.rejectedShas)
+        || entry.rejectedShas.length === 0
+        || entry.rejectedShas.some((sha) => typeof sha !== 'string' || sha.length === 0))) {
+      throw new Error(`Acknowledged baseline entry ${entry.name} needs rejectedShas to be a non-empty array of commit SHAs`);
     }
     if (Object.hasOwn(entry, 'cutover')) {
       if (!entry.cutover || typeof entry.cutover !== 'object' || Array.isArray(entry.cutover)) {
@@ -223,10 +248,23 @@ export function applyAcceptanceBaseline(problems, baseline, now = Date.now()) {
     const entry = accepted.get(key);
     if (entry) {
       seen.add(key);
-      if (!Object.hasOwn(entry, 'expiresAt') || now < Date.parse(entry.expiresAt)) {
+      // An entry may scope its acknowledgment to an explicit rejection cohort
+      // (entry.rejectedShas). A problem carrying any SHA outside that cohort
+      // is NEW information wearing the acknowledged name:status — the exact
+      // shape a recovered service's next, unrelated rejection takes — and must
+      // block (#6483 cross-model review, verified by execution). Additive:
+      // callers whose problems or entries carry no rejectedShas are unchanged.
+      const novelRejections = Array.isArray(entry.rejectedShas) && Array.isArray(problem.rejectedShas)
+        ? problem.rejectedShas.filter((sha) => !entry.rejectedShas.includes(sha))
+        : [];
+      if (novelRejections.length > 0) {
+        blocking.push({ ...problem, novelRejections, issue: entry.issue });
+      } else if (!Object.hasOwn(entry, 'expiresAt') || now < Date.parse(entry.expiresAt)) {
         acknowledged.push({ ...problem, issue: entry.issue });
       } else {
-        blocking.push(problem);
+        // Carry the expired entry's identity so the report can attribute the
+        // red line to a scheduled re-page instead of a fresh outage.
+        blocking.push({ ...problem, expiredEntry: entry.expiresAt, issue: entry.issue });
       }
     } else {
       blocking.push(problem);
@@ -252,11 +290,53 @@ function readAcceptanceBaseline() {
   return JSON.parse(readFileSync(BASELINE_URL, 'utf8'));
 }
 
+/**
+ * Health decides STALE_CONTENT on a different clock from STALE_SEED, and this
+ * line has to print the one that actually fired.
+ *
+ *   seed     seedAgeMin vs maxStaleMin         "is the seeder running"  -> STALE_SEED
+ *   content  contentAgeMin vs maxContentAgeMin "is the data advancing"  -> STALE_CONTENT
+ *
+ * This printed the seed pair unconditionally, so every STALE_CONTENT line read
+ * as a contradiction: euFsi showed `age=1200m max=5760m` — comfortably inside
+ * budget — while the breach was contentAgeMin 19230 against maxContentAgeMin
+ * 14400. A reader can only conclude the monitor is wrong.
+ *
+ * The seed pair is by definition INSIDE budget on a STALE_CONTENT row, so it is
+ * never the reason and must never be printed as though it were. That holds even
+ * when the content numbers are missing, which happens two different ways:
+ *
+ *   contentAgeMin === null   health fail-closes on an unreadable content clock,
+ *                            so the source is stale because nothing in the
+ *                            payload carries a date (jodiGas).
+ *   no content fields at all health also reaches STALE_CONTENT via
+ *                            requireContentFreshness — a per-country verdict
+ *                            (portwatchPortActivity). That detail names WHICH
+ *                            country is stale, so api/health.js strips it from
+ *                            the public compact shape (#6060) that this monitor
+ *                            reads. The numbers are operator-only by design and
+ *                            are not coming; say so and point at where they live.
+ */
 function describeProblem(problem) {
-  const freshness = Number.isFinite(problem.seedAgeMin)
+  const seedClock = Number.isFinite(problem.seedAgeMin)
     ? ` age=${problem.seedAgeMin}m max=${problem.maxStaleMin ?? 'unknown'}m`
     : '';
-  return `${problem.name}: status=${problem.status} records=${problem.records ?? 'unknown'}${freshness}`;
+
+  if (problem.status !== 'STALE_CONTENT') {
+    return `${problem.name}: status=${problem.status} records=${problem.records ?? 'unknown'}${seedClock}`;
+  }
+
+  // Marked `ok` so the healthy clock is never mistaken for the failing one.
+  const seedAside = Number.isFinite(problem.seedAgeMin)
+    ? ` (seed age=${problem.seedAgeMin}m ok)`
+    : '';
+  const contentClock = Number.isFinite(problem.maxContentAgeMin)
+    ? ` contentAge=${Number.isFinite(problem.contentAgeMin)
+      ? `${problem.contentAgeMin}m`
+      : 'unknown (no dated item; scored stale)'} maxContentAge=${problem.maxContentAgeMin}m`
+    : ' contentAge=operator-only (per-country freshness; see detailed /api/health)';
+
+  return `${problem.name}: status=${problem.status} records=${problem.records ?? 'unknown'}${contentClock}${seedAside}`;
 }
 
 /**
@@ -301,7 +381,40 @@ export function formatAcceptanceReport(
   return { info, errors, failed: errors.length > 0 };
 }
 
+export function normalizeCheckedAt(checkedAt, now = Date.now()) {
+  if (!isUtcIsoInstant(checkedAt)) {
+    throw new Error('Compact health payload checkedAt must be a valid UTC ISO instant');
+  }
+  const checkedAtMs = Date.parse(checkedAt);
+  const ageMs = now - checkedAtMs;
+  if (ageMs < 0 || ageMs > MAX_HEALTH_OBSERVATION_AGE_MS) {
+    throw new Error('Compact health payload checkedAt is outside the accepted observation window');
+  }
+  return new Date(checkedAtMs).toISOString();
+}
+
+/**
+ * One machine-readable observation, built from the exact same fail-closed split
+ * and report as the human log. The workflow status publisher consumes this;
+ * keeping it here prevents the text and machine verdicts from drifting apart.
+ */
+export function buildAcceptanceObservation(payload, baseline, now = Date.now()) {
+  const checkedAt = normalizeCheckedAt(payload?.checkedAt, now);
+  const acceptance = applyAcceptanceBaseline(findOperationalProblems(payload, now), baseline, now);
+  return {
+    version: 1,
+    checkedAt,
+    acceptance,
+    report: formatAcceptanceReport(acceptance, checkedAt),
+  };
+}
+
 async function main() {
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: { 'json-output': { type: 'string' } },
+    strict: true,
+  });
   const healthUrl = process.env.HEALTH_URL || DEFAULT_HEALTH_URL;
   const response = await fetch(healthUrl, {
     headers: { 'User-Agent': 'worldmonitor-seed-freshness-monitor/1.0' },
@@ -312,10 +425,10 @@ async function main() {
   }
 
   const payload = await response.json();
-  const report = formatAcceptanceReport(
-    applyAcceptanceBaseline(findOperationalProblems(payload), readAcceptanceBaseline()),
-    payload.checkedAt,
-  );
+  const observation = buildAcceptanceObservation(payload, readAcceptanceBaseline());
+  const outputPath = values['json-output'];
+  if (outputPath) writeFileSync(outputPath, `${JSON.stringify(observation, null, 2)}\n`);
+  const { report } = observation;
   for (const line of report.info) console.log(line);
   for (const line of report.errors) console.error(line);
   if (report.failed) process.exitCode = 1;

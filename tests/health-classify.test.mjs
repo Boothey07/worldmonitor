@@ -13,8 +13,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { __testing__ } from '../api/health.js';
+import { BUNDLE_HEARTBEAT_TTL_SECONDS, bundleHeartbeatKey } from '../scripts/_bundle-runner.mjs';
+import { BOOTSTRAP_KEY as AVIATION_BOOTSTRAP_KEY, BOOTSTRAP_META_KEY as AVIATION_BOOTSTRAP_META_KEY } from '../scripts/seed-aviation.mjs';
 
 const {
   classifyKey,
@@ -25,6 +28,8 @@ const {
   SEED_META,
   ON_DEMAND_KEYS,
   ZERO_RECORD_DATA_OK_KEYS,
+  EMPTY_DATA_OK_KEYS,
+  projectChinaCoverageStatus,
 } = __testing__;
 
 const NOW = 1_700_000_000_000;
@@ -91,6 +96,234 @@ test('classifyKey: fresh seed + data → OK', () => {
       metaValues: { 'seed-meta:seismology:earthquakes': seedMeta() },
     }));
   assert.equal(entry.status, 'OK');
+});
+
+test('classifyKey: non-empty failedDatasets surfaces a partial static seed as SEED_ERROR', () => {
+  const entry = classifyKey(
+    'resilienceStaticIndex',
+    STANDALONE_KEYS.resilienceStaticIndex,
+    { allowOnDemand: false },
+    makeCtx({
+      strens: { [STANDALONE_KEYS.resilienceStaticIndex]: 4096 },
+      metaValues: {
+        [SEED_META.resilienceStaticIndex.key]: seedMeta({
+          status: 'ok',
+          recordCount: 196,
+          failedDatasets: ['wgi'],
+        }),
+      },
+    }),
+  );
+
+  assert.equal(entry.status, 'SEED_ERROR');
+  assert.deepEqual(entry.failedDatasets, ['wgi']);
+  const snapshot = {
+    status: 'WARNING',
+    summary: { total: 1, ok: 0, warn: 1, crit: 0 },
+    checkedAt: new Date(NOW).toISOString(),
+    checks: { resilienceStaticIndex: entry },
+  };
+  assert.deepEqual(
+    healthResponseBody(snapshot, true).problems.resilienceStaticIndex.failedDatasets,
+    ['wgi'],
+  );
+  assert.deepEqual(
+    healthResponseBody(healthResponseBody(snapshot, true), true).problems.resilienceStaticIndex.failedDatasets,
+    ['wgi'],
+    'the cached compact snapshot preserves the failed adapter projection',
+  );
+
+  const siblingEntry = classifyKey(
+    'resilienceStaticFao',
+    STANDALONE_KEYS.resilienceStaticFao,
+    { allowOnDemand: false },
+    makeCtx({
+      strens: { [STANDALONE_KEYS.resilienceStaticFao]: 4096 },
+      metaValues: {
+        [SEED_META.resilienceStaticFao.key]: seedMeta({
+          status: 'ok',
+          recordCount: 196,
+          failedDatasets: ['wgi'],
+        }),
+      },
+    }),
+  );
+  assert.equal(siblingEntry.status, 'OK');
+  assert.equal(siblingEntry.failedDatasets, undefined);
+});
+
+test('classifyKey: failedDatasets projection validates, deduplicates, and stops at 50 entries', () => {
+  const valid = Array.from({ length: 60 }, (_, index) => `dataset-${index}`);
+  const entry = classifyKey(
+    'resilienceStaticIndex',
+    STANDALONE_KEYS.resilienceStaticIndex,
+    { allowOnDemand: false },
+    makeCtx({
+      strens: { [STANDALONE_KEYS.resilienceStaticIndex]: 4096 },
+      metaValues: {
+        [SEED_META.resilienceStaticIndex.key]: seedMeta({
+          status: 'ok',
+          recordCount: 196,
+          failedDatasets: [null, '', 'x'.repeat(101), valid[0], valid[0], ...valid.slice(1)],
+        }),
+      },
+    }),
+  );
+
+  assert.equal(entry.status, 'SEED_ERROR');
+  assert.deepEqual(entry.failedDatasets, valid.slice(0, 50));
+});
+
+test('classifyKey: resilience ranking and interval metadata must match the active cache state', () => {
+  const original = {
+    RESILIENCE_PILLAR_COMBINE_ENABLED: process.env.RESILIENCE_PILLAR_COMBINE_ENABLED,
+    RESILIENCE_SCHEMA_V2_ENABLED: process.env.RESILIENCE_SCHEMA_V2_ENABLED,
+    RESILIENCE_EDUCATION_ENABLED: process.env.RESILIENCE_EDUCATION_ENABLED,
+  };
+  process.env.RESILIENCE_PILLAR_COMBINE_ENABLED = 'false';
+  process.env.RESILIENCE_SCHEMA_V2_ENABLED = 'true';
+  process.env.RESILIENCE_EDUCATION_ENABLED = 'true';
+
+  const expected = {
+    recordCount: 196,
+    _formula: 'd6',
+    _educationState: 'education-on',
+    _intervalMethodology: 'weight-perturbation-sensitivity-v3',
+  };
+
+  try {
+    for (const name of ['resilienceRanking', 'resilienceIntervals']) {
+      const dataKey = BOOTSTRAP_KEYS[name] ?? STANDALONE_KEYS[name];
+      assert.ok(dataKey, `${name} must have a registered data key`);
+      const classify = (tags) => classifyKey(
+        name,
+        dataKey,
+        { allowOnDemand: false },
+        makeCtx({
+          strens: { [dataKey]: 2048 },
+          metaValues: { [SEED_META[name].key]: seedMeta(tags) },
+        }),
+      );
+
+      const healthy = classify(expected);
+      assert.equal(healthy.status, 'OK', `${name} current cache state must be healthy`);
+      assert.equal(healthy.cacheState.ok, true);
+
+      for (const staleTags of [
+        {},
+        { ...expected, _formula: 'pc' },
+        { ...expected, _educationState: 'education-off' },
+        { ...expected, _intervalMethodology: 'weight-perturbation-sensitivity-v2' },
+      ]) {
+        const stale = classify(staleTags);
+        assert.equal(stale.status, 'STALE_SEED', `${name} must reject stale or missing cache-state tags`);
+        assert.equal(stale.cacheState.ok, false);
+        assert.equal(stale.cacheState.requiredFormula, 'd6');
+        assert.equal(stale.cacheState.requiredEducationState, 'education-on');
+        assert.equal(stale.cacheState.requiredIntervalMethodology, 'weight-perturbation-sensitivity-v3');
+      }
+    }
+  } finally {
+    for (const [key, value] of Object.entries(original)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('classifyKey: resilience formula defaults active and only explicit false selects rollback', () => {
+  const originalPillar = process.env.RESILIENCE_PILLAR_COMBINE_ENABLED;
+  const originalSchema = process.env.RESILIENCE_SCHEMA_V2_ENABLED;
+  const originalEducation = process.env.RESILIENCE_EDUCATION_ENABLED;
+  process.env.RESILIENCE_SCHEMA_V2_ENABLED = 'true';
+  process.env.RESILIENCE_EDUCATION_ENABLED = 'true';
+
+  try {
+    for (const { raw, formula } of [
+      { raw: undefined, formula: 'pc' },
+      { raw: 'true', formula: 'pc' },
+      { raw: 'false', formula: 'd6' },
+    ]) {
+      if (raw === undefined) delete process.env.RESILIENCE_PILLAR_COMBINE_ENABLED;
+      else process.env.RESILIENCE_PILLAR_COMBINE_ENABLED = raw;
+      const dataKey = BOOTSTRAP_KEYS.resilienceRanking ?? STANDALONE_KEYS.resilienceRanking;
+      assert.ok(dataKey);
+      const tags = {
+        _formula: formula,
+        _educationState: 'education-on',
+        _intervalMethodology: 'weight-perturbation-sensitivity-v3',
+      };
+      const entry = classifyKey(
+        'resilienceRanking',
+        dataKey,
+        { allowOnDemand: false },
+        makeCtx({
+          strens: { [dataKey]: 2048 },
+          metaValues: { [SEED_META.resilienceRanking.key]: seedMeta(tags) },
+        }),
+      );
+      assert.equal(entry.status, 'OK', `pillar=${String(raw)} must require ${formula}`);
+      assert.equal(entry.cacheState.requiredFormula, formula);
+    }
+  } finally {
+    if (originalPillar == null) delete process.env.RESILIENCE_PILLAR_COMBINE_ENABLED;
+    else process.env.RESILIENCE_PILLAR_COMBINE_ENABLED = originalPillar;
+    if (originalSchema == null) delete process.env.RESILIENCE_SCHEMA_V2_ENABLED;
+    else process.env.RESILIENCE_SCHEMA_V2_ENABLED = originalSchema;
+    if (originalEducation == null) delete process.env.RESILIENCE_EDUCATION_ENABLED;
+    else process.env.RESILIENCE_EDUCATION_ENABLED = originalEducation;
+  }
+});
+
+test('classifyKey: resilience interval metadata below the publication floor is partial', () => {
+  const dataKey = STANDALONE_KEYS.resilienceIntervals;
+  const entry = classifyKey(
+    'resilienceIntervals',
+    dataKey,
+    { allowOnDemand: false },
+    makeCtx({
+      strens: { [dataKey]: 2048 },
+      metaValues: {
+        [SEED_META.resilienceIntervals.key]: seedMeta({
+          recordCount: 179,
+          _formula: 'pc',
+          _educationState: 'education-on',
+          _intervalMethodology: 'weight-perturbation-sensitivity-v3',
+        }),
+      },
+    }),
+  );
+
+  assert.equal(entry.status, 'COVERAGE_PARTIAL');
+  assert.equal(entry.records, 179);
+  assert.equal(entry.minRecordCount, 180);
+});
+
+test('classifyKey: resilience interval coverage fails closed on missing or malformed counts', () => {
+  const dataKey = STANDALONE_KEYS.resilienceIntervals;
+  const malformedCounts = [undefined, null, 'invalid', Infinity, {}, []];
+
+  for (const recordCount of malformedCounts) {
+    const entry = classifyKey(
+      'resilienceIntervals',
+      dataKey,
+      { allowOnDemand: false },
+      makeCtx({
+        strens: { [dataKey]: 2048 },
+        metaValues: {
+          [SEED_META.resilienceIntervals.key]: seedMeta({
+            recordCount,
+            _formula: 'pc',
+            _educationState: 'education-on',
+            _intervalMethodology: 'weight-perturbation-sensitivity-v3',
+          }),
+        },
+      }),
+    );
+
+    assert.equal(entry.status, 'COVERAGE_PARTIAL', `recordCount=${String(recordCount)}`);
+    assert.equal(entry.minRecordCount, 180);
+  }
 });
 
 test('classifyKey: consumer-price coverage below the declared completion floor degrades', () => {
@@ -1513,6 +1746,56 @@ test('classifyKey: webcams active pointer is registered with seed-meta freshness
   assert.equal(entry.maxStaleMin, 1440);
 });
 
+const BUNDLE_TICKS = [
+  ['staticRefBundleTick', 'static-ref', 'scripts/seed-bundle-static-ref.mjs', 6691],
+  ['staticRefHeavyBundleTick', 'static-ref-heavy', 'scripts/seed-bundle-static-ref-heavy.mjs', 6806],
+];
+
+test('classifyKey: each bundle tick heartbeat goes EMPTY when the cron never fired and STALE when it freezes', () => {
+  for (const [name, label] of BUNDLE_TICKS) {
+    const dataKey = STANDALONE_KEYS[name];
+    const seedCfg = SEED_META[name];
+    assert.equal(dataKey, bundleHeartbeatKey(label), name);
+
+    const missing = classifyKey(name, dataKey, { allowOnDemand: true }, makeCtx({}));
+    assert.equal(missing.status, 'EMPTY', name);
+    assert.equal(STATUS_COUNTS[missing.status], 'crit', name);
+
+    const stale = classifyKey(name, dataKey, { allowOnDemand: true }, makeCtx({
+      strens: { [dataKey]: 128 },
+      metaValues: { [seedCfg.key]: seedMeta({ fetchedAt: NOW - 2881 * ONE_MIN_MS, recordCount: 1 }) },
+    }));
+    assert.equal(stale.status, 'STALE_SEED', name);
+    assert.equal(stale.maxStaleMin, 2880, name);
+    assert.equal(STATUS_COUNTS[stale.status], 'warn', name);
+
+    const fresh = classifyKey(name, dataKey, { allowOnDemand: true }, makeCtx({
+      strens: { [dataKey]: 128 },
+      metaValues: { [seedCfg.key]: seedMeta({ recordCount: 1 }) },
+    }));
+    assert.equal(fresh.status, 'OK', name);
+  }
+});
+
+test('the three bundle tick heartbeats stay registered together (#6691 / #6806)', () => {
+  for (const [name, label, bundlePath, issue] of BUNDLE_TICKS) {
+    assert.equal(STANDALONE_KEYS[name], bundleHeartbeatKey(label));
+    assert.equal(SEED_META[name].key, bundleHeartbeatKey(label));
+    assert.equal(SEED_META[name].maxStaleMin, 2880, `${name} must use the 48h = 2× daily budget`);
+    assert.equal(ON_DEMAND_KEYS.has(name), false, `${name} is a seeded watchdog, not on-demand`);
+    assert.equal(SEED_META[name].cutover?.mode, 'expiring-ack');
+    assert.equal(SEED_META[name].cutover?.fromKey, null);
+    assert.equal(SEED_META[name].cutover?.status, 'EMPTY');
+    assert.equal(SEED_META[name].cutover?.issue, issue);
+    assert.ok(
+      BUNDLE_HEARTBEAT_TTL_SECONDS > SEED_META[name].maxStaleMin * 60,
+      `${name}: TTL must outlive maxStaleMin so a late tick is STALE_SEED, not EMPTY`,
+    );
+    const bundle = readFileSync(new URL(`../${bundlePath}`, import.meta.url), 'utf8');
+    assert.match(bundle, new RegExp(`runBundle\\(\\s*'${label}'\\s*,`));
+  }
+});
+
 test('classifyKey: digestNotifications heartbeat goes stale when the cron stops', () => {
   const entry = classifyKey('digestNotifications', STANDALONE_KEYS.digestNotifications, { allowOnDemand: true },
     makeCtx({
@@ -1731,4 +2014,181 @@ test('overall: crit above ~3% of total → UNHEALTHY / 200', () => {
   // 5/150 = 0.033 > 0.03
   assert.deepEqual(computeOverall(5, 0, 150), { status: 'UNHEALTHY', http: 200 });
   assert.deepEqual(computeOverall(20, 2, 150), { status: 'UNHEALTHY', http: 200 });
+});
+
+// #6987. flightDelays serves the combined page-load aggregate but read its
+// record count from seed-meta:aviation:faa, which carries the FAA-ONLY count
+// (seed-aviation.mjs writes it as faa.alerts.length). On 2026-08-20 a quiet FAA
+// window published recordCount=0 while the aggregate still served 115 alerts --
+// 14 of them FAA-sourced -- and classifyKey read that zero as EMPTY_DATA,
+// blocking the seed-freshness monitor with a healthy panel.
+const classifyFlightDelays = (over = {}, strlen = 57_608) => classifyKey(
+  'flightDelays',
+  BOOTSTRAP_KEYS.flightDelays,
+  { allowOnDemand: false },
+  makeCtx({
+    strens: { [BOOTSTRAP_KEYS.flightDelays]: strlen },
+    metaValues: { [SEED_META.flightDelays.key]: seedMeta(over) },
+  }),
+);
+
+test('#6987 — a quiet FAA window does not empty the aggregate flightDelays serves', () => {
+  // The exact production shape: aggregate full, FAA contributing nothing.
+  assert.equal(classifyFlightDelays({ recordCount: 115 }).status, 'OK');
+});
+
+test('#6987 — an aggregate that is genuinely empty still alarms', () => {
+  // The counterweight. Fixing the false alarm must not blind the probe: this is
+  // the state the EMPTY_DATA verdict exists for, and it must survive.
+  assert.equal(classifyFlightDelays({ recordCount: 0 }).status, 'EMPTY_DATA');
+});
+
+test('#6987 — flightDelays counts its own data key, not a contributing source', () => {
+  // The regression itself, asserted structurally so it cannot creep back via a
+  // key swap that the two behavioural tests above would still pass.
+  assert.notEqual(
+    SEED_META.flightDelays.key,
+    'seed-meta:aviation:faa',
+    'seed-meta:aviation:faa counts FAA alerts only — strictly smaller than the aggregate served',
+  );
+  // writeSeedMeta derives `seed-meta:<dataKey without :vN>`; pinning health to
+  // that derivation is what keeps the count and the payload the same population.
+  assert.equal(
+    SEED_META.flightDelays.key,
+    `seed-meta:${BOOTSTRAP_KEYS.flightDelays.replace(/:v\d+$/, '')}`,
+  );
+});
+
+test('#6987 — health and seed-aviation agree on the aggregate meta key', () => {
+  // Cross-file, against the seeder's REAL exported constants rather than a
+  // regex over its source: if the producer renames the key it writes, or health
+  // repoints, this fails instead of both sides drifting quietly.
+  assert.equal(BOOTSTRAP_KEYS.flightDelays, AVIATION_BOOTSTRAP_KEY);
+  assert.equal(SEED_META.flightDelays.key, AVIATION_BOOTSTRAP_META_KEY);
+});
+
+// The other half of #6987. faaDelays had no SEED_META entry at all, on the
+// grounds that it "shares flightDelays's meta key" — the sharing that caused the
+// bug. It now has an explicit one (ported from #6988), which must ADD staleness
+// coverage without withdrawing the quiet-window allowance that makes an empty
+// FAA feed a valid state rather than a fault.
+const classifyFaaDelays = (over = {}) => classifyKey(
+  'faaDelays',
+  STANDALONE_KEYS.faaDelays,
+  { allowOnDemand: false },
+  makeCtx({
+    strens: { [STANDALONE_KEYS.faaDelays]: 13 }, // {"alerts":[]}
+    metaValues: { [SEED_META.faaDelays.key]: seedMeta(over) },
+  }),
+);
+
+test('#6987 — a quiet FAA window stays valid for the sidecar probe', () => {
+  assert.ok(
+    EMPTY_DATA_OK_KEYS.has('faaDelays'),
+    'an empty FAA feed is a normal state; withdrawing that turns quiet nights into alarms',
+  );
+  assert.equal(classifyFaaDelays({ recordCount: 0 }).status, 'OK');
+});
+
+test('#6987 — the sidecar probe gains the staleness coverage it never had', () => {
+  // The point of giving faaDelays its own entry: allowed-to-be-empty must not
+  // also mean allowed-to-stop. 200min against maxStaleMin 90.
+  assert.equal(
+    classifyFaaDelays({ recordCount: 0, fetchedAt: NOW - 200 * ONE_MIN_MS }).status,
+    'STALE_SEED',
+  );
+});
+
+test('#6987 — the two aviation probes no longer share a meta key', () => {
+  // The regression in one line: sharing let FAA's allowed-empty count decide the
+  // aggregate probe, which is not allowed to be empty.
+  assert.notEqual(SEED_META.flightDelays.key, SEED_META.faaDelays.key);
+  assert.equal(SEED_META.faaDelays.key, 'seed-meta:aviation:faa');
+});
+
+// A summary that is degraded for ONE hourly evaluation is far more often a
+// sampling miss than an outage — measured 2026-08-25, a two-minute miss on
+// market.china-stock-connect cost ~50 minutes of CHINA_DEGRADED while 13 of the
+// surrounding 16 monitor runs were clean. Requiring a second consecutive
+// observation trades one cycle of detection latency for that.
+const chinaSummary = (over = {}) => ({
+  schemaVersion: 1,
+  countryCode: 'CN',
+  status: 'degraded',
+  evaluatedAt: '2026-08-25T17:03:23.563Z',
+  // isValidChinaCoverageSummary RECOMPUTES every count from entries and rejects
+  // any mismatch, so the fixture has to be internally consistent or it is thrown
+  // out as invalid and reads CHINA_UNAVAILABLE for the wrong reason.
+  counts: { total: 1, launched: 1, planned: 0, blocked: 0, healthy: 0, degraded: 1, unavailable: 0 },
+  entries: [{
+    id: 'market.china-stock-connect',
+    launchStatus: 'launched',
+    status: 'degraded',
+    reasonCodes: ['CHINA_COVERAGE_PARTIAL'],
+  }],
+  ...over,
+});
+
+test('china coverage: a single degraded evaluation does not alarm', () => {
+  const projected = projectChinaCoverageStatus(chinaSummary({ degradedStreak: 1 }));
+  assert.equal(projected.status, 'OK');
+});
+
+test('china coverage: a second consecutive degraded evaluation alarms', () => {
+  const projected = projectChinaCoverageStatus(chinaSummary({ degradedStreak: 2 }));
+  assert.equal(projected.status, 'CHINA_DEGRADED');
+});
+
+test('china coverage: nonpositive streaks cannot suppress a degraded alarm', () => {
+  for (const degradedStreak of [0, -1]) {
+    const projected = projectChinaCoverageStatus(chinaSummary({ degradedStreak }));
+    assert.equal(projected.status, 'CHINA_DEGRADED', `degradedStreak=${degradedStreak}`);
+  }
+});
+
+test('china coverage: a held verdict stays visible rather than silent', () => {
+  // The counterweight to the debounce. If holding the verdict also hid the
+  // reason, a suppressed cycle would be indistinguishable from health.
+  const projected = projectChinaCoverageStatus(chinaSummary({ degradedStreak: 1 }));
+  assert.equal(projected.status, 'OK');
+  assert.equal(projected.chinaStatus, 'degraded', 'the summary verdict is still reported');
+  assert.equal(projected.degradedStreak, 1);
+  assert.ok(projected.problems?.some((p) => p.id === 'market.china-stock-connect'));
+});
+
+test('china coverage: a held verdict survives the compact health projection', () => {
+  const projected = projectChinaCoverageStatus(chinaSummary({ degradedStreak: 1 }));
+  const compact = healthResponseBody({
+    status: 'HEALTHY',
+    summary: { total: 1, ok: 1, warn: 0, crit: 0 },
+    checkedAt: '2026-08-25T17:03:23.563Z',
+    checks: { chinaCoverage: projected },
+  }, true);
+
+  assert.equal(compact.problems?.chinaCoverage?.status, 'OK');
+  assert.equal(compact.problems?.chinaCoverage?.chinaStatus, 'degraded');
+  assert.equal(compact.problems?.chinaCoverage?.degradedStreak, 1);
+  assert.ok(compact.problems?.chinaCoverage?.problems?.some(
+    (problem) => problem.id === 'market.china-stock-connect',
+  ));
+  assert.deepEqual(healthResponseBody(compact, true), compact, 'cached compact snapshots remain stable');
+});
+
+test('china coverage: a summary with no streak field alarms as before', () => {
+  // Rollout safety. Every summary written before the producer shipped the field
+  // has no streak; absent evidence must not read as evidence of health, or the
+  // rollout window would silence a genuine outage.
+  const projected = projectChinaCoverageStatus(chinaSummary());
+  assert.equal(projected.status, 'CHINA_DEGRADED');
+});
+
+test('china coverage: UNAVAILABLE is never debounced', () => {
+  // The more severe verdict, and the expensive direction to be wrong in.
+  const projected = projectChinaCoverageStatus(chinaSummary({
+    status: 'unavailable',
+    degradedStreak: 1,
+    counts: { total: 1, launched: 1, planned: 0, blocked: 0, healthy: 0, degraded: 0, unavailable: 1 },
+    entries: [{ id: 'market.china-stock-connect', launchStatus: 'launched', status: 'unavailable', reasonCodes: [] }],
+  }));
+  assert.equal(projected.status, 'CHINA_UNAVAILABLE');
 });

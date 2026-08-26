@@ -67,6 +67,19 @@
       "stable": "คงที่"
     },
     "militaryActivity": "กิจกรรมทางทหาร",
+    "defenseIndustrial": {
+      "title": "Defense Industrial Base",
+      "expenditure": "Military spend",
+      "personnel": "Personnel",
+      "armsImports": "Arms imports",
+      "concentration": "Supplier HHI",
+      "suppliers": "Arms suppliers ({{start}}–{{end}})",
+      "source": "Sources: World Bank and SIPRI Arms Transfers Database. TIV measures transfer volume, not financial value.",
+      "sourceWorldBank": "Source: World Bank.",
+      "unavailable": "Not available",
+      "coverage": "Mapped coverage",
+      "supplierRetained": "Supplier data retained from the last successful importer refresh."
+    },
     "economicIndicators": "ตัวชี้วัดเศรษฐกิจ",
     "ownFlights": "เที่ยวบินในประเทศ",
     "foreignFlights": "เที่ยวบินต่างประเทศ",
@@ -152,9 +165,7 @@
       "energyMix": "สัดส่วนการผลิตไฟฟ้า",
       "coal": "ถ่านหิน",
       "noMajorDisruptions": "ไม่มีรายงานการหยุดชะงักที่สำคัญ",
-      "activeDisruptions_one": "การหยุดชะงักที่ยังดำเนินอยู่ {{count}} รายการ",
       "activeDisruptions_other": "การหยุดชะงักที่ยังดำเนินอยู่ {{count}} รายการ",
-      "activeSignals_one": "สัญญาณที่ยังดำเนินอยู่ {{count}} รายการ",
       "activeSignals_other": "สัญญาณที่ยังดำเนินอยู่ {{count}} รายการ",
       "aviationSource": "การติดตามการบิน",
       "hazardSource": "สัญญาณข่าวกรองรายประเทศ",
@@ -177,6 +188,48 @@
       "corridorConditions": "สภาวะทางเดิน",
       "activityNowcast": "การคาดการณ์กิจกรรมปัจจุบัน",
       "decisionSignalsUnavailable": "ภาพรวมสัญญาณการตัดสินใจของจีนไม่พร้อมใช้งานในขณะนี้"
+    },
+    "foodStocks": "Food stocks",
+    "foodStocksHelp": "USDA PSD commodity stocks-to-use by marketing year, with the world ratio alongside for context. FAOSTAT fills production only where PSD has no country coverage.",
+    "loadingFoodStocks": "Loading food stocks…",
+    "foodStocksUnavailable": "Food stocks unavailable.",
+    "foodStocksProLocked": "Upgrade to PRO for commodity stocks-to-use",
+    "foodStocksCommodity": "Commodity",
+    "foodStocksMarketingYear": "Marketing year",
+    "foodStocksRatio": "Stocks-to-use",
+    "foodStocksWorld": "World",
+    "commodities": {
+      "wheat": "Wheat",
+      "corn": "Corn",
+      "rice": "Rice",
+      "soybeans": "Soybeans",
+      "barley": "Barley",
+      "palmOil": "Palm oil"
+    },
+    "demographicsCapability": {
+      "title": "Demographics & Workforce",
+      "help": "Age structure, education pipeline, and industrial workforce capacity from UN WPP, UNESCO UIS and World Bank WDI, and ILOSTAT.",
+      "loading": "Loading demographics and workforce data…",
+      "unavailable": "Demographics and workforce data unavailable.",
+      "proLocked": "Upgrade to PRO for demographics and workforce data",
+      "notAvailable": "Not available",
+      "ageStructure": "Age structure",
+      "education": "Education pipeline",
+      "industrialWorkforce": "Industrial workforce",
+      "medianAge": "Median age",
+      "oldAgeDependency": "Old-age dependency",
+      "totalDependency": "Total dependency",
+      "workingAgePopulation": "Working-age population",
+      "workingAgeProjection": "Working-age population (+10 years)",
+      "tertiaryEnrollment": "Tertiary enrollment",
+      "stemGraduates": "STEM graduates",
+      "researchers": "Researchers",
+      "craftTrades": "Craft and trades workers",
+      "plantOperators": "Plant and machine operators",
+      "trainedIndustrialWorkforce": "Combined industrial workforce",
+      "manufacturingShare": "Manufacturing employment",
+      "source": "Sources: {{sources}}.",
+      "retained": "{{stage}} data retained from the last successful refresh."
     }
   },
   "header": {
@@ -308,6 +361,7 @@
     "securityAdvisories": "คำเตือนด้านความปลอดภัย",
     "orefSirens": "Israel Sirens",
     "telegramIntel": "ข่าวกรอง Telegram",
+    "xIntel": "X News Accounts",
     "startups": "สตาร์ทอัพและ VC",
     "vcblogs": "ข้อมูลเชิงลึกและบทความ VC",
     "regionalStartups": "ข่าวสตาร์ทอัพทั่วโลก",
@@ -446,7 +500,9 @@
         "displacement": "สลับการเคลื่อนย้ายผู้พลัดถิ่น",
         "climate": "สลับความผิดปกติของสภาพภูมิอากาศ",
         "outages": "สลับการขัดข้องของอินเทอร์เน็ต",
-        "tradeRoutes": "สลับเส้นทางการค้า"
+        "tradeRoutes": "สลับเส้นทางการค้า",
+        "canadaRoads": "Toggle Canada roads overlay",
+        "canadaAlerts": "Toggle Canada provincial emergency alerts overlay"
       },
       "view": {
         "dark": "เปลี่ยนเป็นโหมดมืด",
@@ -608,7 +664,7 @@
         "URLHAUS_AUTH_KEY": "ใช้สำหรับทั้ง URLhaus และ ThreatFox API",
         "OTX_API_KEY": "แหล่งเสริมทางเลือกสำหรับเลเยอร์ภัยคุกคามไซเบอร์",
         "ABUSEIPDB_API_KEY": "แหล่งเสริมทางเลือกสำหรับชื่อเสียง IP ที่เป็นอันตราย",
-        "FINNHUB_API_KEY": "ราคาหุ้นเรียลไทม์และข้อมูลตลาด",
+        "FINNHUB_API_KEY": "ราคาหุ้นที่ล่าช้าหรือโหลดไว้ล่วงหน้าและข้อมูลตลาด คีย์ไม่ใช่การถ่ายทอดสด",
         "NASA_FIRMS_API_KEY": "ระบบข้อมูลไฟสำหรับการจัดการทรัพยากร",
         "OLLAMA_API_URL": "เช่น http://127.0.0.1:11434 (Ollama) หรือ http://127.0.0.1:1234/v1 (LM Studio) — จุดปลายทางที่เข้ากันได้กับ OpenAI",
         "OLLAMA_MODEL": "เช่น llama3.1:8b — แท็กโมเดลที่ใช้สำหรับการสรุป"
@@ -852,7 +908,12 @@
       "loadingHistory": "กำลังโหลดประวัติการขนส่ง…",
       "historyUnavailable": "ไม่มีประวัติการขนส่ง",
       "transitDataUnavailable": "ไม่มีข้อมูลการขนส่ง (บางส่วนต้นน้ำ)",
-      "infoTooltip": "<strong>ตัวติดตามห่วงโซ่อุปทาน</strong> การติดตามโลจิสติกส์และทรัพยากรทั่วโลก:<ul><li><strong>จุดคอขวด</strong>: สถานะการขนส่งทางทะเล คะแนนการหยุดชะงัก และจำนวนเรือ</li><li><strong>การขนส่ง</strong>: ดัชนี Baltic Dry และแนวโน้มค่าขนส่ง</li><li><strong>แร่ธาตุ</strong>: ความเสี่ยงจากความเข้มข้นของแร่ธาตุหาค่ายาก (HHI) และผู้ผลิตชั้นนำ</li></ul>คลิกการ์ดจุดคอขวดเพื่อขยายแผนภูมิประวัติการขนส่ง"
+      "infoTooltip": "<strong>ตัวติดตามห่วงโซ่อุปทาน</strong> การติดตามโลจิสติกส์และทรัพยากรทั่วโลก:<ul><li><strong>จุดคอขวด</strong>: สถานะการขนส่งทางทะเล คะแนนการหยุดชะงัก และจำนวนเรือ</li><li><strong>การขนส่ง</strong>: ดัชนี Baltic Dry และแนวโน้มค่าขนส่ง</li><li><strong>แร่ธาตุ</strong>: ความเสี่ยงจากความเข้มข้นของแร่ธาตุหาค่ายาก (HHI) และผู้ผลิตชั้นนำ</li></ul>คลิกการ์ดจุดคอขวดเพื่อขยายแผนภูมิประวัติการขนส่ง",
+      "mineStage": "Mine",
+      "refineryStage": "Refine",
+      "stageUnavailable": "No published figures for this stage",
+      "withheldNote": "W withheld",
+      "productionCaption": "Country shares of actual production. The map deposits layer shows where resources sit; this table shows who mines or refines them."
     },
     "tradePolicy": {
       "tariffs": "ภาษีศุลกากร",
@@ -896,6 +957,7 @@
       "noComtradeData": "ไม่มีข้อมูลการไหลเวียนเชิงกลยุทธ์",
       "comtradeUnavailable": "ข้อมูล UN Comtrade ไม่พร้อมใช้งานชั่วคราว",
       "sourceComtrade": "UN Comtrade",
+      "comtradeNationalScope": "UN Comtrade rows are national-level official statistics for the reporting country. They are not a town, corridor, factory, port, or shipment export ledger.",
       "anomalyBadge": "ความผิดปกติ",
       "colReporter": "ประเทศ",
       "colCommodity": "สินค้า",
@@ -1132,7 +1194,7 @@
         "ucdpEvents": "เหตุการณ์ UCDP",
         "displacementFlows": "กระแสการพลัดถิ่น",
         "climateAnomalies": "ความผิดปกติของสภาพภูมิอากาศ",
-        "weatherAlerts": "การแจ้งเตือนสภาพอากาศในสหรัฐฯ (NWS)",
+        "weatherAlerts": "การแจ้งเตือนสภาพอากาศรุนแรง (NWS, ECCC, WMO SWIC)",
         "strategicWaterways": "เส้นทางน้ำยุทธศาสตร์",
         "economicCenters": "ศูนย์กลางเศรษฐกิจ",
         "criticalMinerals": "แร่ธาตุสำคัญ",
@@ -1152,7 +1214,9 @@
         "speciesRecovery": "การฟื้นตัวของสายพันธุ์",
         "renewableInstallations": "พลังงานสะอาด",
         "radiationSpike": "การเพิ่มขึ้นของรังสี",
-        "radiationElevated": "รังสีสูงขึ้น"
+        "radiationElevated": "รังสีสูงขึ้น",
+        "canadaRoads": "Canada Roads",
+        "canadaAlerts": "Canada Alerts (AB + BC + SK)"
       },
       "tooltip": {
         "earthquake": "แผ่นดินไหว",
@@ -1213,7 +1277,7 @@
           "infraDatacenters": "คลัสเตอร์คำนวณ AI >=10,000 GPU",
           "infraOutages": "การดับอินเทอร์เน็ตและการหยุดชะงักของบริการ",
           "naturalEventsTech": "แผ่นดินไหว, พายุ, ไฟ (อาจส่งผลต่อศูนย์ข้อมูล)",
-          "weatherAlerts": "การแจ้งเตือนสภาพอากาศรุนแรงในสหรัฐฯ (NWS)",
+          "weatherAlerts": "การแจ้งเตือนสภาพอากาศรุนแรงอย่างเป็นทางการจากหน่วยงานอุตุนิยมวิทยาแห่งชาติ (NWS, ECCC, WMO SWIC)",
           "economicCenters": "ตลาดหลักทรัพย์และธนาคารกลาง",
           "countriesOverlay": "ภาพซ้อนทับชื่อประเทศ",
           "financeExchanges": "ตลาดหลักทรัพย์ระดับโลกตามระดับตลาด",
@@ -1225,7 +1289,7 @@
           "financeOutages": "การหยุดชะงักอินเทอร์เน็ตที่อาจส่งผลต่อการดำเนินการตลาด",
           "financeCyberThreats": "เหตุการณ์ด้านความปลอดภัยรอบโครงสร้างพื้นฐานการเงิน",
           "macroWaterways": "จุดคอขวดยุทธศาสตร์สำหรับการขนส่งสินค้าโภคภัณฑ์",
-          "weatherAlertsMarket": "เหตุการณ์สภาพอากาศรุนแรงในสหรัฐฯ ที่เกี่ยวข้องกับตลาด (NWS)",
+          "weatherAlertsMarket": "การแจ้งเตือนสภาพอากาศรุนแรงอย่างเป็นทางการที่เกี่ยวข้องกับตลาด (NWS, ECCC, WMO SWIC)",
           "naturalEventsMacro": "แผ่นดินไหว ไฟ น้ำท่วม และภัยธรรมชาติอื่น ๆ",
           "timeRecent": "กรองข้อมูลตามเวลาล่าสุดเป็นชั่วโมง",
           "timeExtended": "แสดงข้อมูลสัปดาห์ เดือน หรือทั้งหมดที่ผ่านมา",
@@ -1258,7 +1322,9 @@
           "tradeRoutes": "เส้นทางเดินเรือหลักของโลกที่เชื่อมต่อท่าเรือผ่านจุดยุทธศาสตร์",
           "dayNight": "เส้นแบ่งเขตแสงอาทิตย์แบบเรียลไทม์แสดงโซนกลางวันและกลางคืน",
           "geoBoundaries": "เขตปลอดทหาร แนวหยุดยิง และพรมแดนที่เป็นข้อพิพาท",
-          "ciiChoropleth": "แผนที่ความร้อนดัชนีความไม่มั่นคงของประเทศ — ระบายสีประเทศตามคะแนน CII (เขียว=มั่นคง, แดง=วิกฤต)"
+          "ciiChoropleth": "แผนที่ความร้อนดัชนีความไม่มั่นคงของประเทศ — ระบายสีประเทศตามคะแนน CII (เขียว=มั่นคง, แดง=วิกฤต)",
+          "canadaRoads": "Official road incidents, alerts, conditions, closures, construction, and hazards across supported Canadian jurisdictions",
+          "canadaAlerts": "Provincial public-safety alerts from Alberta Emergency Alert, B.C. Evacuation Orders and Alerts, and SaskAlert"
         },
         "notes": {
           "timeAffects": "ส่งผลต่อ: แผ่นดินไหว, สภาพอากาศ, การประท้วง, การหยุดชะงัก"
@@ -1336,7 +1402,6 @@
       "clusters": "กลุ่มข้อมูล",
       "alertsLabel": "การแจ้งเตือน",
       "alert": "การแจ้งเตือน",
-      "sources_one": "{{count}} แหล่งที่มา",
       "sources_other": "{{count}} แหล่งที่มา",
       "briefTech": "บทสรุปเทคโนโลยี",
       "briefCommodity": "บทสรุปสินค้าโภคนำ",
@@ -1634,7 +1699,9 @@
     "breakingNews": {
       "critical": "วิกฤต",
       "high": "สูง",
-      "dismiss": "ปิด"
+      "dismiss": "ปิด",
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "การแจ้งเตือนด่วน",
@@ -1694,6 +1761,21 @@
       "viewSource": "ดูแหล่งที่มา",
       "filterGeopolitics": "ภูมิรัฐศาสตร์",
       "filterCyber": "ไซเบอร์"
+    },
+    "xIntel": {
+      "infoTooltip": "Curated public news-account posts from X. Official API only.",
+      "loading": "Connecting to X news-account relay...",
+      "empty": "No posts available",
+      "disabled": "X news-account relay not active",
+      "filterAll": "All",
+      "filterBreaking": "Breaking",
+      "filterConflict": "Conflict",
+      "filterOsint": "OSINT",
+      "filterMiddleeast": "Middle East",
+      "live": "LIVE",
+      "viewSource": "View Source",
+      "filterGeopolitics": "Geopolitics",
+      "filterCyber": "Cyber"
     },
     "investments": {
       "infoTooltip": "ฐานข้อมูลการลงทุนโดยตรงจากต่างประเทศของซาอุดีอาระเบียและ UAE ในโครงสร้างพื้นฐานสำคัญระดับโลก คลิกแถวเพื่อบินไปยังการลงทุนบนแผนที่",
@@ -1871,13 +1953,23 @@
       "topTargets": "ประเทศเป้าหมายชั้นนำ"
     },
     "commodities": {
-      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress."
+      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress.",
+      "commodities": "Commodities",
+      "physicalPremiums": "Physical premium",
+      "physical": "Physical",
+      "paper": "Paper",
+      "premium": "Premium",
+      "asOf": "As of {{date}}",
+      "metals": {
+        "gold": "Gold",
+        "silver": "Silver"
+      }
     },
     "crypto": {
       "infoTooltip": "<strong>Crypto</strong> Live prices, 24h changes, and volume for major cryptocurrencies. Data sourced from CoinGecko."
     },
     "gulfEconomies": {
-      "infoTooltip": "<strong>Gulf Economies</strong> Real-time Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
+      "infoTooltip": "<strong>Gulf Economies</strong> Seeded Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
     },
     "groceryBasket": {
       "infoTooltip": "<strong>Grocery Index</strong> Global grocery basket price comparison across 24 countries — tracks real-world consumer goods inflation beyond headline CPI."
@@ -1945,17 +2037,12 @@
       },
       "time": {
         "justNow": "เมื่อสักครู่",
-        "hoursAgo_one": "{{count}}h ที่ผ่านมา",
         "hoursAgo_other": "{{count}}h ที่ผ่านมา",
-        "daysAgo_one": "{{count}}d ที่ผ่านมา",
         "daysAgo_other": "{{count}}d ที่ผ่านมา"
       },
       "filters": {
-        "alert_one": "{{count}} การแจ้งเตือน",
         "alert_other": "{{count}} การแจ้งเตือน",
-        "warning_one": "{{count}} คำเตือน",
         "warning_other": "{{count}} คำเตือน",
-        "watch_one": "{{count}} การติดตาม",
         "watch_other": "{{count}} การติดตาม"
       },
       "errors": {
@@ -2118,7 +2205,6 @@
       "rationale": "เหตุผล:",
       "driver": "ตัวขับเคลื่อน:",
       "appliesToNext": "ใช้กับการสร้างสัญญาณ AI ครั้งถัดไป",
-      "signals_one": "{{count}} สัญญาณ",
       "signals_other": "{{count}} สัญญาณ",
       "disclaimer": "สัญญาณการซื้อขายที่สร้างโดย AI เพื่อวัตถุประสงค์ข้อมูลเท่านั้น ไม่ใช่คำแนะนำการลงทุน ทำการศึกษาวิจัยของคุณเองเสมอ",
       "unavailable": "ผลกระทบต่อตลาด AI จะสร้างขึ้นหลังจากแต่ละครั้งที่รันการพยากรณ์ กรุณาตรวจสอบอีกครั้งในไม่ช่วงเวลา"
@@ -2139,7 +2225,7 @@
       "infoTooltip": "<strong>Disaster Cascade</strong> ตรวจจับสัญญาณภัยธรรมชาติและโครงสร้างพื้นฐานที่บรรจบกัน:<ul><li>สหสัมพันธ์แผ่นดินไหว ไฟป่า น้ำท่วม และสภาพอากาศสุดโต่ง</li><li>ติดตามผลกระทบแบบเรียงซ้อนต่อโครงสร้างพื้นฐานและห่วงโซ่อุปทาน</li><li>เน้นภูมิภาคที่มีความเสี่ยงจากภัยยุ่งเหยิงรวมกัน</li></ul>คลิกการ์ดเพื่อซูมไปยังภูมิภาคที่ได้รับผลกระทบ"
     },
     "markets": {
-      "infoTooltip": "<strong>Markets</strong> ดัชนีหุ้น หุ้น และราคา crypto แบบเรียลไทม์ ปรับแต่งรายการชมรับชองของคุณด้วยปุ่ม Watchlist Sparklines แสดงแนวโน้มราคาล่าสุด",
+      "infoTooltip": "<strong>Markets</strong> ดัชนีหุ้น หุ้น และราคา crypto แบบล่าช้าหรือโหลดไว้ล่วงหน้า ปรับแต่งรายการชมรับชองของคุณด้วยปุ่ม Watchlist Sparklines แสดงแนวโน้มราคาล่าสุด",
       "chart": {
         "title": "แผนภูมิราคา {{symbol}}",
         "close": "ปิดแผนภูมิ"
@@ -2320,13 +2406,14 @@
     },
     "sanctionsPressure": {
       "title": "การคว่ำบาตรและการระบุตัวตน",
-      "infoTooltip": "การระบุตัวตนตามการคว่ำบาตร OFAC จากรายชื่อ SDN และรายชื่อรวม แสดงว่าประเทศใดที่เผชิญกับความกดดันในการระบุตัวตนมากที่สุด โปรแกรมใดที่เป็นตัวขับเคลื่อน และสิ่งใดที่ได้รับการเพิ่มเข้ามาใหม่นับตั้งแต่การอัปเดตครั้งล่าสุด",
+      "infoTooltip": "รายชื่อ SDN และรายชื่อรวมของ OFAC รวมถึงการระบุตัวตน SEMA/JVCFOA ของ Global Affairs Canada แสดงว่าประเทศใดที่เผชิญกับความกดดันในการระบุตัวตนมากที่สุด โปรแกรมใดที่เป็นตัวขับเคลื่อน และสิ่งใดที่ได้รับการเพิ่มเข้ามาใหม่นับตั้งแต่การอัปเดตครั้งล่าสุด",
       "loading": "กำลังโหลดข้อมูลการคว่ำบาตร...",
       "unavailable": "ข้อมูลการคว่ำบาตรไม่พร้อมใช้งาน",
       "summary": {
         "new": "ใหม่",
         "vessels": "เรือ",
-        "aircraft": "เครื่องบิน"
+        "aircraft": "เครื่องบิน",
+        "sema": "SEMA"
       },
       "sections": {
         "countries": "ประเทศที่ถูกคว่ำบาตร",
@@ -2341,13 +2428,13 @@
       "footer": {
         "updated": "อัปเดตแล้ว {{time}}",
         "dataset": "ชุดข้อมูล {{date}}",
-        "source": "แหล่งที่มา: OFAC"
+        "source": "แหล่งที่มา: OFAC · GAC SEMA"
       },
       "pills": {
         "newCount": "+{{count}} ใหม่",
-        "new": "ใหม่"
+        "new": "ใหม่",
+        "sema": "sema-ca"
       },
-      "designations_one": "{{count}} การระบุตัวตน",
       "designations_other": "{{count}} การระบุตัวตน",
       "fallbacks": {
         "unattributed": "ไม่ได้ระบุแหล่งที่มา",
@@ -2385,9 +2472,7 @@
         "updated": "อัปเดตแล้ว {{time}}"
       },
       "observed": {
-        "hoursAgo_one": "{{count}}h ที่แล้ว",
         "hoursAgo_other": "{{count}}h ที่แล้ว",
-        "daysAgo_one": "{{count}}d ที่แล้ว",
         "daysAgo_other": "{{count}}d ที่แล้ว"
       },
       "confidence": {
@@ -2417,7 +2502,6 @@
     "correlation": {
       "loading": "รอข้อมูล...",
       "empty": "ไม่พบการบรรจบกันที่ใช้งานอยู่",
-      "signals_one": "{{count}} สัญญาณ",
       "signals_other": "{{count}} สัญญาณ",
       "analyzing": "กำลังวิเคราะห์...",
       "viewOnMap": "ดูบนแผนที่"
@@ -2444,16 +2528,11 @@
         "industrial": "อุตสาหกรรม",
         "strategic": "เชิงกลยุทธ์"
       },
-      "observations_one": "{{count}} obs",
       "observations_other": "{{count}} obs",
-      "sources_one": "{{count}} src",
       "sources_other": "{{count}} src",
       "age": {
-        "minutesAgo_one": "{{count}}m ที่แล้ว",
         "minutesAgo_other": "{{count}}m ที่แล้ว",
-        "hoursAgo_one": "{{count}}h ที่แล้ว",
         "hoursAgo_other": "{{count}}h ที่แล้ว",
-        "daysAgo_one": "{{count}}d ที่แล้ว",
         "daysAgo_other": "{{count}}d ที่แล้ว"
       }
     },
@@ -2791,6 +2870,7 @@
     "moreEvents": "เหตุการณ์เพิ่มเติม",
     "monitoring": "กำลังเฝ้าระวัง",
     "viewUSGS": "ดูบน USGS",
+    "viewNRCan": "ดูบน Earthquakes Canada",
     "expired": "หมดอายุ",
     "timeAgo": {
       "s": "{{count}}s ago",
@@ -2910,7 +2990,11 @@
       "heading": "ทิศทาง",
       "hexCode": "รหัส HEX",
       "squawk": "รหัส SQUAWK",
-      "attribution": "แหล่งที่มา: adsb.lol (ODbL) · OpenSky Network"
+      "attribution": "แหล่งที่มา: adsb.lol (ODbL) · OpenSky Network",
+      "climbRate": "อัตราการขึ้น",
+      "manufacturer": "ผู้ผลิต",
+      "owner": "เจ้าของ",
+      "builtYear": "ปีที่ผลิต"
     },
     "militaryVessel": {
       "aisDark": "AIS มืด",
@@ -2955,7 +3039,8 @@
       "moreVessels": "+{{count}} more vessels",
       "vesselsCount": "{{count}} VESSELS",
       "vessels": "เรือ",
-      "trackedVessels": "เรือที่ติดตาม"
+      "trackedVessels": "เรือที่ติดตาม",
+      "showLess": "แสดงน้อยลง"
     },
     "naturalEvent": {
       "closed": "ปิด",
@@ -3221,7 +3306,8 @@
     "retry": "ลองใหม่",
     "refresh": "รีเฟรช",
     "all": "ทั้งหมด",
-    "cancel": "ยกเลิก"
+    "cancel": "ยกเลิก",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "การแสดงผล",
@@ -3243,7 +3329,9 @@
     "fontFamily": "ตระกูลฟอนต์",
     "fontFamilyDesc": "Monospace สำหรับลักษณะเทคนิค ฟอนต์เริ่มต้นของระบบสำหรับการอ่านที่ง่ายกว่า",
     "fontMono": "Monospace",
-    "fontSystem": "ค่าเริ่มต้นของระบบ"
+    "fontSystem": "ค่าเริ่มต้นของระบบ",
+    "panelFontScale": "ขนาดข้อความ",
+    "followGlobalFontScale": "ใช้การตั้งค่าทั่วโลก"
   },
   "contextMenu": {
     "openCountryBrief": "เปิดภาพรวมประเทศ",
@@ -3334,7 +3422,9 @@
       "orefSirens1": "การแจ้งเตือนจรวดและขีปนาวุธของอิสราเอลแบบเรียลไทม์",
       "orefSirens2": "การแมปโซนไซเรนพร้อมการจำแนกภัยคุกคาม",
       "telegramIntel1": "ช่องข่าวกรรมการ OSINT ที่เลือกสรร",
-      "telegramIntel2": "การอัปเดตข้อขัดแย้งและภูมิรัฐศาสตร์เกือบเรียลไทม์"
+      "telegramIntel2": "การอัปเดตข้อขัดแย้งและภูมิรัฐศาสตร์เกือบเรียลไทม์",
+      "xIntel1": "Curated public news accounts on X",
+      "xIntel2": "API-fresh posts with official permalinks"
     }
   },
   "auth": {

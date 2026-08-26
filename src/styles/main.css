@@ -22,9 +22,9 @@
   --text: #e8e8e8;
   --text-secondary: #ccc;
   --text-dim: #888;
-  --text-muted: #666;
-  --text-faint: #555;
-  --text-ghost: #444;
+  --text-muted: #838383; /* was #666 (3.2:1 on --surface); AA 4.9:1 */
+  --text-faint: #7f7f7f; /* was #555 (2.5:1); AA 4.6:1 */
+  --text-ghost: #666; /* was #444 (1.9:1); 3.2:1 — decorative/large text only, never body copy */
   --accent: #fff;
 
   /* Overlays & shadows */
@@ -169,10 +169,9 @@
   --text: #1a1a1a;
   --text-secondary: #333;
   --text-dim: #6b6b6b;
-  --text-muted: #767676;
-  /* WCAG AA: 4.54:1 vs #f8f9fa */
-  --text-faint: #aaa;
-  --text-ghost: #bbb;
+  --text-muted: #6f6f6f; /* was #767676 (4.3:1 vs --bg); AA 4.8:1 */
+  --text-faint: #727272; /* was #aaa (2.2:1); AA 4.6:1 */
+  --text-ghost: #8e8e8e; /* was #bbb (1.8:1); 3.1:1 — decorative/large text only, never body copy */
   --accent: #111111;
 
   /* Overlays & shadows */
@@ -1977,6 +1976,53 @@ body.panel-resize-active iframe {
   flex-shrink: 0;
   position: relative;
   transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Keyboard reorder affordance (see makeDraggable): invisible until keyboard
+   focus reaches it, so pointer users see no change in the header. */
+.panel-move-btn {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.panel-move-btn:focus-visible {
+  width: auto;
+  height: auto;
+  padding: 2px 6px;
+  overflow: visible;
+  clip-path: none;
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  z-index: 3;
+}
+
+/* The resize strips are keyboard-focusable separators (arrow keys resize);
+   show where focus is when it lands on one. */
+.panel-resize-handle:focus-visible,
+.panel-col-resize-handle:focus-visible,
+.map-resize-handle:focus-visible,
+.map-width-resize-handle:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+/* Disclosure cards/rows and sortable headers made keyboard-operable (#7023). */
+.trade-restriction-header:focus-visible,
+.chain-node:focus-visible,
+.watchlist-row:focus-visible,
+.watchlist-th-sortable:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
 }
 
 .panel-header-error {
@@ -7499,6 +7545,123 @@ body.playback-mode .status-dot {
   padding: 10px 14px;
 }
 
+.news-market-correlation {
+  padding: 10px 14px 12px;
+}
+
+.news-market-correlation__controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.news-market-correlation__controls label {
+  display: grid;
+  gap: 3px;
+  color: var(--text-dim);
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.news-market-correlation__controls select {
+  min-width: 0;
+  padding: 5px 7px;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  text-transform: none;
+}
+
+.news-market-correlation__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+}
+
+.news-market-correlation__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.news-market-correlation__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.news-market-correlation__dot--news { background: #f59e0b; }
+.news-market-correlation__dot--market { background: #60a5fa; }
+
+.news-market-correlation__chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 3px 0 6px;
+}
+
+.news-market-correlation__empty {
+  padding: 34px 8px;
+  color: var(--text-dim);
+  text-align: center;
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+}
+
+.news-market-correlation__stats {
+  display: grid;
+  grid-template-columns: 0.8fr 1fr 1.4fr;
+  gap: 6px;
+}
+
+.news-market-correlation__stats > div {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+}
+
+.news-market-correlation__stats span,
+.news-market-correlation__stats small {
+  color: var(--text-dim);
+  font-size: calc(8px * var(--wm-panel-effective-scale, 1));
+}
+
+.news-market-correlation__stats strong {
+  color: var(--text);
+  font-size: calc(13px * var(--wm-panel-effective-scale, 1));
+}
+
+.news-market-correlation__result--neutral strong { color: #a3a3a3; }
+.news-market-correlation__result--positive strong { color: #22c55e; }
+.news-market-correlation__result--negative strong { color: #ef4444; }
+
+.news-market-correlation__caveat,
+.news-market-correlation__freshness {
+  margin-top: 7px;
+  color: var(--text-dim);
+  font-size: calc(8px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.35;
+}
+
+.news-market-correlation__freshness {
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .news-market-correlation__controls,
+  .news-market-correlation__stats {
+    grid-template-columns: 1fr;
+  }
+}
+
 .liquidity-shifts-panel__section-title {
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
   font-weight: 700;
@@ -11609,6 +11772,31 @@ a.prediction-link:hover {
   border-bottom: 1px solid var(--border);
 }
 
+/* biome-ignore lint/correctness/noUnknownPseudoClass: Chrome declarative WebMCP pseudo-class. */
+.global-procurement-controls:tool-form-active {
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+.global-procurement-controls.webmcp-tool-active {
+  outline: 2px dashed var(--green);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+/* Keep the exact declaring controls in Chrome's active schema and visually
+ * distinguish the pending state. Event handlers block competing interaction;
+ * pointer targeting must remain intact so panel dragging still sees controls. */
+.global-procurement-controls.webmcp-request-pending > :not([data-procurement-reset]) {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.global-procurement-controls.webmcp-request-pending > .global-procurement-toggle:focus-within {
+  opacity: 1;
+}
+
 .global-procurement-toggle {
   display: flex;
   align-items: center;
@@ -11639,7 +11827,8 @@ a.prediction-link:hover {
 
 .global-procurement-input:focus,
 .global-procurement-select:focus {
-  outline: 1px solid var(--green);
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
   border-color: var(--green);
 }
 
@@ -11657,6 +11846,30 @@ a.prediction-link:hover {
 .global-procurement-apply {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+}
+
+/* biome-ignore lint/correctness/noUnknownPseudoClass: Chrome declarative WebMCP pseudo-class. */
+.global-procurement-apply:tool-submit-active {
+  outline: 2px dashed var(--green);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.global-procurement-controls.webmcp-tool-active .global-procurement-apply {
+  outline: 2px dashed var(--green);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.global-procurement-controls .global-procurement-input:focus-visible,
+.global-procurement-controls .global-procurement-select:focus-visible,
+.global-procurement-controls .global-procurement-toggle input:focus-visible,
+.global-procurement-controls .global-procurement-apply:focus-visible,
+.global-procurement-controls .global-procurement-reset:focus-visible {
+  outline: 2px solid var(--semantic-info);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--semantic-info) 24%, transparent);
+  opacity: 1;
 }
 
 .global-procurement-apply:disabled,
@@ -11809,6 +12022,14 @@ a.prediction-link:hover {
 
 .sc-risk-low {
   color: var(--green, #69f0ae);
+}
+
+/* Mineral production table: the unallocated "Other countries" remainder and a
+   per-row data vintage are both secondary to the named producers they annotate. */
+.sc-mineral-residual,
+.sc-mineral-vintage {
+  color: var(--text-secondary, #90a4ae);
+  font-size: 0.9em;
 }
 
 .trade-restriction-card.expanded {
@@ -12053,11 +12274,13 @@ a.prediction-link:hover {
   margin-left: 6px;
 }
 
-.trade-tariff-gap-positive {
+/* Named by direction vs baseline, not numeric sign: 'positive' colored orange
+   while .change-positive is green read as an inverted convention (#7023). */
+.trade-tariff-gap-above {
   color: var(--orange, #ffab40);
 }
 
-.trade-tariff-gap-negative {
+.trade-tariff-gap-below {
   color: var(--green, #69f0ae);
 }
 
@@ -13470,6 +13693,30 @@ a.prediction-link:hover {
  * "shown/total" for layers the globe's marker budget is trimming (#5368).
  * Muted and right-aligned: it reports a limit, it is not a call to action.
  */
+/* #7112: the marker-budget disclosure for maps with no layer-toggle rail —
+   `chrome: false` embeds. The per-layer `shown/total` badge needs a toggle row to
+   sit on; this states the same fact for the whole overlay when no row exists.
+   Informational only: pointer-events stay on so the title tooltip works, but it
+   is not a control and must not read as one. */
+.map-truncation-summary {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  z-index: 60;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+  /* Theme tokens, not hardcoded colours: an embed inherits the host page's
+     theme and a fixed white would vanish on the light one. */
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  cursor: help;
+  pointer-events: auto;
+}
+
 .layer-truncation-count {
   margin-left: auto;
   font-size: calc(8px * var(--wm-panel-effective-scale, 1));
@@ -14112,7 +14359,7 @@ a.prediction-link:hover {
   padding: 8px 16px;
   border-top: 1px solid var(--overlay-medium);
   font-size: calc(10px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
 }
 
 .pizzint-footer a {
@@ -14314,7 +14561,7 @@ a.prediction-link:hover {
 
 .mobile-menu-footer-links a {
   font-size: calc(12px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
   text-decoration: none;
   letter-spacing: 0.02em;
 }
@@ -14326,7 +14573,7 @@ a.prediction-link:hover {
 .mobile-menu-version {
   padding: 4px 20px 16px;
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost);
+  color: var(--text-faint);
 }
 
 .region-sheet-backdrop {
@@ -16599,7 +16846,7 @@ a.prediction-link:hover {
 }
 
 .signal-sources-label {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -16607,7 +16854,7 @@ a.prediction-link:hover {
 }
 
 .signal-source-chip {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   padding: 2px 6px;
   background: rgba(0, 170, 255, 0.15);
   color: var(--accent);
@@ -16628,7 +16875,7 @@ a.prediction-link:hover {
 }
 
 .signal-articles-header {
-  font-size: 9px;
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -19807,7 +20054,8 @@ a.prediction-link:hover {
 }
 
 .unified-settings-preset-chip:focus-visible {
-  outline: none;
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 /* Unified settings selects */
@@ -20671,13 +20919,46 @@ body:has(.tauri-titlebar) .breaking-news-container {
   text-overflow: ellipsis;
 }
 
+.breaking-alert-headline-link {
+  color: inherit;
+}
+
 .breaking-alert-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
   color: rgba(255, 255, 255, 0.7);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
+.breaking-alert-provenance {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.breaking-alert-source {
+  min-width: 0;
+}
+
+.breaking-alert .tier-badge,
+.breaking-alert .propaganda-badge {
+  flex-shrink: 0;
+}
+
+.breaking-alert .tier-badge {
+  margin-right: 0;
+}
+
+.breaking-alert .propaganda-badge {
+  margin-left: 0;
+}
+
+.breaking-alert-view-panel,
 .breaking-alert-dismiss {
   background: var(--overlay-heavy);
   border: none;
@@ -20689,8 +20970,15 @@ body:has(.tauri-titlebar) .breaking-news-container {
   flex-shrink: 0;
 }
 
+.breaking-alert-view-panel:hover,
 .breaking-alert-dismiss:hover {
   background: rgba(255, 255, 255, 0.3);
+}
+
+.breaking-alert-view-panel:focus-visible,
+.breaking-alert-dismiss:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 body.has-breaking-alert .panels-grid {
@@ -22621,7 +22909,7 @@ body.has-breaking-alert .panels-grid {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-ghost);
+  color: var(--text-faint);
   font-size: calc(11px * var(--wm-panel-effective-scale, 1));
 }
 
@@ -22884,7 +23172,7 @@ body.has-breaking-alert .panels-grid {
 
 .cw-dismiss {
   font-size: calc(10px * var(--wm-panel-effective-scale, 1));
-  color: var(--text-ghost, #444);
+  color: var(--text-faint, #555);
   cursor: pointer;
   background: none;
   border: none;
@@ -22907,6 +23195,7 @@ body.has-breaking-alert .panels-grid {
   z-index: 10;
   transition: background 0.15s ease;
   flex-shrink: 0;
+  touch-action: none;
 }
 
 .map-width-resize-handle::after {
@@ -22934,13 +23223,46 @@ body.map-width-resizing {
   user-select: none;
 }
 
-@media (min-width: 1600px) {
+/* The map-side toggle only means something in the split layout. */
+.map-side-btn {
+  display: none;
+}
+
+/* In a narrow map column the absolutely-centered clock overlaps the header
+   actions; the width-resize handler toggles this class. */
+.map-section.map-col-narrow .header-clock {
+  display: none;
+}
+
+/* 900px mirrors SPLIT_LAYOUT_MIN_WIDTH (src/app/split-layout.ts) — one
+   threshold for web and desktop since #6417 (the Tauri window minimum width
+   keeps the desktop app above it, so this block covers both). The map track
+   pins both pixel floors: 220px = MAP_COL_MIN_PX and 306px = PANELS_COL_MIN_PX
+   + MAP_COL_DIVIDER_PX. tests/responsive-zone-listener.test.mjs pins the
+   alignment. */
+@media (min-width: 900px) {
   .main-content {
     display: grid;
-    grid-template-columns: var(--map-col-width, 60%) 6px 1fr;
+    grid-template-columns: min(max(var(--map-col-width, 60%), 220px), calc(100% - 306px)) 6px 1fr;
     grid-template-rows: 1fr auto;
     gap: 4px 0;
     overflow: hidden;
+  }
+
+  .main-content.map-right:not(.map-hidden) {
+    grid-template-columns: 1fr 6px min(max(var(--map-col-width, 60%), 220px), calc(100% - 306px));
+  }
+
+  .main-content.map-right .map-section {
+    grid-column: 3;
+  }
+
+  .main-content.map-right .panels-grid {
+    grid-column: 1;
+  }
+
+  .map-side-btn {
+    display: inline-flex;
   }
 
   .map-width-resize-handle {
@@ -23024,76 +23346,6 @@ body.map-width-resizing {
   }
 }
 
-/* Desktop app grid layout (active at any width >= 900px via JS class) */
-.main-content.desktop-grid {
-  display: grid;
-  grid-template-columns: var(--map-col-width, 60%) 6px 1fr;
-  grid-template-rows: 1fr auto;
-  gap: 4px 0;
-  overflow: hidden;
-}
-
-.main-content.desktop-grid .map-width-resize-handle {
-  display: flex;
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.main-content.desktop-grid.map-hidden {
-  grid-template-columns: 1fr;
-}
-
-.main-content.desktop-grid.map-hidden .panels-grid {
-  grid-column: 1;
-}
-
-.main-content.desktop-grid.map-hidden .map-width-resize-handle {
-  display: none;
-}
-
-.main-content.desktop-grid .map-section {
-  grid-column: 1;
-  grid-row: 1;
-  height: 100% !important;
-  min-height: 0;
-  max-height: none;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  border-bottom: none;
-}
-
-.main-content.desktop-grid .panels-grid {
-  grid-column: 3;
-  grid-row: 1;
-  min-height: 0;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  grid-auto-rows: minmax(var(--dashboard-panel-row-min), var(--dashboard-panel-row-max));
-  align-content: start;
-  overflow-y: auto;
-}
-
-.main-content.desktop-grid .map-resize-handle {
-  position: relative;
-  bottom: auto;
-  left: auto;
-  right: auto;
-  height: 12px;
-  background: var(--border-subtle);
-  margin: 0;
-  cursor: ns-resize;
-  display: flex;
-}
-
-.main-content.desktop-grid .map-resize-handle:hover {
-  background: var(--accent);
-}
-
-.main-content.desktop-grid .map-bottom-grid:empty {
-  border-top: none;
-  padding: 0;
-}
-
 /* ==========================================================================
    Telegram Intel Panel
    ========================================================================== */
@@ -23139,6 +23391,13 @@ body.map-width-resizing {
   gap: 6px;
   flex: 1;
   overflow: hidden;
+}
+
+.telegram-intel-channel-wrapper .propaganda-badge,
+.telegram-intel-channel-wrapper .tier-badge {
+  flex-shrink: 0;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .telegram-intel-channel {
@@ -23244,6 +23503,109 @@ body.map-width-resizing {
 }
 
 .telegram-follow-btn:hover {
+  background: var(--accent-dim);
+  color: var(--bg);
+}
+
+/* ==========================================================================
+   X News Accounts Panel (#6654)
+   ========================================================================== */
+
+.x-intel-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.x-intel-degraded {
+  margin: 6px 8px;
+  padding: 6px 8px;
+  border: 1px solid rgb(245 158 11 / 35%);
+  border-radius: 4px;
+  color: var(--color-warning, #f59e0b);
+  background: rgb(245 158 11 / 8%);
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+}
+
+.x-intel-item {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--surface);
+  transition: background 0.15s ease, border-left-color 0.15s ease;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.x-intel-item.is-live {
+  background: rgba(0, 255, 127, 0.02);
+  border-left-color: var(--green);
+}
+
+.x-intel-item:hover {
+  background: var(--overlay-light);
+}
+
+.x-intel-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.x-intel-account-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.x-intel-account {
+  font-weight: 600;
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+}
+
+.x-intel-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.x-intel-topic {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.x-intel-time {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-muted);
+}
+
+.x-intel-text {
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.x-intel-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.x-intel-follow-btn {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 4px 8px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.x-intel-follow-btn:hover {
   background: var(--accent-dim);
   color: var(--bg);
 }
@@ -25304,6 +25666,32 @@ body.map-width-resizing {
   letter-spacing: 0.04em;
 }
 
+.credibility-score-badge {
+  font-size: calc(8px * var(--wm-panel-effective-scale, 1));
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 1px 5px;
+  border: 1px solid;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.credibility-score-badge.band-high {
+  color: var(--green, #4ade80);
+  border-color: color-mix(in srgb, var(--green, #4ade80) 40%, transparent);
+  background: color-mix(in srgb, var(--green, #4ade80) 12%, transparent);
+}
+.credibility-score-badge.band-medium {
+  color: var(--yellow, #eab308);
+  border-color: color-mix(in srgb, var(--yellow, #eab308) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow, #eab308) 12%, transparent);
+}
+.credibility-score-badge.band-low {
+  color: var(--red, #f87171);
+  border-color: color-mix(in srgb, var(--red, #f87171) 40%, transparent);
+  background: color-mix(in srgb, var(--red, #f87171) 12%, transparent);
+}
+
 /* ── Structured Intel Brief Sections ─────────────────────────── */
 .brief-section {
   margin-bottom: 12px;
@@ -25757,6 +26145,56 @@ body.map-width-resizing {
 
 .upgrade-pro-cta:hover { opacity: 0.85; }
 
+/* -- Legal links + pre-payment assent (#6976) -- */
+/* The dashboard had no path to the Terms at all, and every upgrade CTA jumped
+   straight to Dodo's hosted checkout, where Dodo (merchant of record) shows its
+   terms and never ours. Both surfaces are built by src/utils/legal-links.ts. */
+
+.legal-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border-color, #30363d);
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  /* Sticky to the bottom of the scrolling modal: the Settings tab is long
+     enough that a row parked at the end of the scroll would be several
+     screens down, which is not "one click from the dashboard". -20px cancels
+     .modal's own bottom padding so it pins flush to the edge. */
+  position: sticky;
+  bottom: -20px;
+  z-index: 1;
+  margin-top: 8px;
+  background: var(--surface);
+}
+
+.legal-links-item {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.legal-links-item:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.checkout-consent {
+  margin: 0 0 8px;
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.checkout-consent-link {
+  color: var(--text-dim);
+  text-decoration: underline;
+}
+
+.checkout-consent-link:hover {
+  color: var(--text);
+}
+
 .upgrade-pro-status-line {
   font-size: calc(12px * var(--wm-panel-effective-scale, 1));
   color: var(--text-dim);
@@ -25989,6 +26427,15 @@ body.map-width-resizing {
   justify-content: flex-end;
   gap: 6px;
   flex: 0 0 auto;
+}
+
+/* The checkout-consent line (#6976) is a full-width row inside the action
+   column so the assent reads above the CTA it belongs to, rather than becoming
+   a third column in the notice's space-between row. */
+.api-plan-limit-notice-actions .checkout-consent {
+  flex: 1 0 100%;
+  margin: 0 0 2px;
+  text-align: right;
 }
 
 .api-plan-limit-notice-actions .btn {
@@ -26844,6 +27291,8 @@ body.map-width-resizing {
 
   .breaking-alert-meta {
     flex-basis: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
   }
 }
 
@@ -27426,4 +27875,142 @@ body.map-width-resizing {
 .markers-settled .dark-vessel-indicator,
 .markers-settled .tech-event-marker.upcoming-soon::after {
   animation: none;
+}
+
+/* ── Accessibility: motion & focus visibility (#6573) ─────────────────── */
+
+/* Honor the OS-level reduced-motion preference globally. Individual guards
+   exist for a handful of selectors above, but ~80 infinite animations and
+   ~325 transitions ran unconditionally. Durations collapse to near-zero
+   (rather than `animation: none`) so animationend/transitionend listeners
+   still fire and will-change cleanups keep working. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus rings for controls whose base rules declare `outline: none` (or
+   swap only border-color on :focus, below the 3:1 non-text contrast bar)
+   without a :focus-visible replacement. Keyboard-only — :focus-visible
+   leaves mouse focus styling as designed. */
+.region-select:focus-visible,
+.focus-select:focus-visible,
+.playback-slider:focus-visible,
+.search-input:focus-visible,
+.embed-snippet-textarea:focus-visible,
+.sources-search input:focus-visible,
+.panels-search input:focus-visible,
+.mcp-input:focus-visible,
+.cp-world-filter:focus-visible,
+.chat-analyst-input:focus-visible,
+.us-notif-slack-input:focus-visible,
+.live-news-manage-search-input:focus-visible,
+.deckgl-layer-toggles .layer-search:focus-visible,
+.fw-import-input:focus-visible,
+.fw-import-textarea:focus-visible,
+.auth-profile-input:focus-visible,
+.debt-search:focus-visible,
+.api-keys-name-input:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+.stock-research-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+.stock-research-room {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border, #2c3038);
+  border-radius: 10px;
+  padding: 20px 22px 24px;
+  color: var(--text, #e8e4da);
+}
+.stock-research-close {
+  float: right;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, #2c3038);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.stock-research-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.stock-research-symbol {
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+}
+.stock-research-tape {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim, #9a9589);
+}
+.stock-research-chart {
+  margin: 12px 0 20px;
+}
+.stock-research-news {
+  padding-left: 18px;
+}
+.stock-research-news span {
+  display: block;
+  color: var(--text-dim, #9a9589);
+  font-size: 12px;
+}
+
+/* Windows High Contrast / forced-colors (#7023): backgrounds are stripped by
+   the UA, which erased the color-only severity dots and flattened status
+   badges. Borders survive forced colors; the dot additionally opts out of
+   adjustment so its severity hue (now also exposed via aria-label) remains. */
+@media (forced-colors: active) {
+  .panel-severity-dot {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+
+  .panel-data-badge,
+  .pizzint-location-status,
+  .panel-count {
+    border: 1px solid CanvasText;
+  }
+}
+
+/* Keyboard-activatable drill-in rows (#7023): visible focus for the
+   role="button" cards and tabindex'd table rows wired via bindActivationKeys. */
+.geo-hub-item:focus-visible,
+.tech-hub-item:focus-visible,
+.te-card:focus-visible,
+.fdi-row:focus-visible,
+.risk-item-clickable:focus-visible,
+.risk-alert-clickable:focus-visible,
+.posture-theater:focus-visible,
+.finding-item:focus-visible,
+.cii-name:focus-visible,
+.climate-row:focus-visible,
+.ucdp-row:focus-visible,
+.disp-row:focus-visible,
+.radiation-row:focus-visible,
+.fs-row:focus-visible,
+.pp-row:focus-visible,
+.sf-row:focus-visible,
+.ed-row:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
 }

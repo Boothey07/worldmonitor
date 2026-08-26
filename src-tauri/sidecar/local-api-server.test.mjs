@@ -10,7 +10,13 @@ import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { createLocalApiServer, __testing__ } from './local-api-server.mjs';
+
+test('keeps seed-owned defense snapshots cloud-preferred regardless of relay configuration', () => {
+  assert.equal(__testing__.isCloudPreferred('/api/bootstrap'), true);
+  assert.equal(__testing__.isCloudPreferred('/api/military/v1/get-defense-industrial-base'), true);
+});
 
 // The sidecar default-denies when LOCAL_API_TOKEN is unset (security fix:
 // previously "unset" meant "auth disabled", which made any standalone run
@@ -49,6 +55,94 @@ async function listen(server, host = '127.0.0.1', port = 0) {
   }
   return address.port;
 }
+
+function executeYoutubeEmbedHtml(html) {
+  const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert.ok(script, 'youtube embed response must contain an executable script');
+  const posted = [];
+  const appendedScripts = [];
+  let playerEvents = null;
+  const parent = {};
+  Object.defineProperty(parent, 'postMessage', {
+    configurable: false,
+    get: () => (message, targetOrigin) => posted.push({ message, targetOrigin }),
+    set: () => {
+      throw new Error('child attempted to replace parent.postMessage');
+    },
+  });
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    window: { parent, addEventListener() {} },
+    document: {
+      createElement: () => ({}),
+      head: { appendChild: (node) => appendedScripts.push(node) },
+      getElementById: () => ({ classList: { add() {}, remove() {} } }),
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    YT: {
+      Player: class {
+        constructor(_elementId, options) {
+          playerEvents = options.events;
+        }
+
+        mute() {}
+        playVideo() {}
+        isMuted() { return true; }
+        getVolume() { return 0; }
+      },
+    },
+  };
+
+  runInNewContext(script, sandbox);
+  assert.equal(typeof sandbox.onYouTubeIframeAPIReady, 'function');
+  sandbox.onYouTubeIframeAPIReady();
+  playerEvents.onReady();
+  return { posted, appendedScripts };
+}
+
+test('youtube embed bridge accepts exact Tauri origin and no-ops rejected parents', async () => {
+  const localApi = await setupApiDir({});
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    logger: { log() {}, warn() {}, error() {} },
+  });
+  const { port } = await app.start();
+
+  try {
+    const allowedResponse = await fetch(
+      `http://127.0.0.1:${port}/api/youtube-embed?videoId=e34xb-Fbl0U&parentOrigin=${encodeURIComponent('https://tauri.localhost')}`,
+    );
+    assert.equal(allowedResponse.status, 200);
+    const allowed = executeYoutubeEmbedHtml(await allowedResponse.text());
+    assert.equal(allowed.appendedScripts.length, 1, 'the YouTube API must still initialize');
+    assert.ok(
+      allowed.posted.some(({ message, targetOrigin }) => message?.type === 'yt-ready' && targetOrigin === 'https://tauri.localhost'),
+      'supported Tauri parent must receive yt-ready at its exact origin',
+    );
+
+    for (const parentOrigin of ['', 'https://evil.example']) {
+      const query = parentOrigin ? `&parentOrigin=${encodeURIComponent(parentOrigin)}` : '';
+      const response = await fetch(
+        `http://127.0.0.1:${port}/api/youtube-embed?videoId=e34xb-Fbl0U${query}`,
+      );
+      assert.equal(response.status, 200);
+      const rejected = executeYoutubeEmbedHtml(await response.text());
+      assert.equal(rejected.appendedScripts.length, 1, 'rejected parents must not abort player setup');
+      assert.deepEqual(rejected.posted, [], 'rejected parents must receive no bridge messages');
+    }
+  } finally {
+    await app.close();
+    await localApi.cleanup();
+  }
+});
 
 async function postJsonViaHttp(url, payload, headers = {}) {
   const target = new URL(url);
@@ -533,6 +627,54 @@ test('replaces browser origin with localhost origin for local handlers', async (
     await app.close();
     await localApi.cleanup();
     await remote.close();
+  }
+});
+
+test('injects the desktop product key into the product-only OpenSky local handler', async () => {
+  const originalProductKey = process.env.WORLDMONITOR_API_KEY;
+  process.env.WORLDMONITOR_API_KEY = 'desktop-product-key';
+  const remote = await setupRemoteServer();
+  const localApi = await setupApiDir({
+    'opensky.js': `
+      export default async function handler(req) {
+        return new Response(JSON.stringify({
+          origin: req.headers.get('origin'),
+          productKey: req.headers.get('x-worldmonitor-key'),
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    `,
+  });
+
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    remoteBase: remote.remoteBase,
+    logger: { log() { }, warn() { }, error() { } },
+  });
+  const { port } = await app.start();
+
+  try {
+    const response = await authFetch(`http://127.0.0.1:${port}/api/opensky`, {
+      headers: {
+        Origin: 'https://tauri.localhost',
+        'X-WorldMonitor-Key': 'renderer-supplied-key',
+      },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      origin: `http://127.0.0.1:${port}`,
+      productKey: 'desktop-product-key',
+    });
+    assert.equal(remote.hits.length, 0);
+  } finally {
+    await app.close();
+    await localApi.cleanup();
+    await remote.close();
+    if (originalProductKey === undefined) delete process.env.WORLDMONITOR_API_KEY;
+    else process.env.WORLDMONITOR_API_KEY = originalProductKey;
   }
 });
 

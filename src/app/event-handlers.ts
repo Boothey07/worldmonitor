@@ -104,11 +104,30 @@ import { resolveGateAction, type PanelGateReason } from '@/services/panel-gating
 import { ExportGateControl } from '@/components/ExportGateControl';
 import { h, setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { scheduleAfterFirstPaint } from '@/utils/after-paint';
+import {
+  isAgentAnalyticsSuppressed,
+  isAgentPanelViewSuppressed,
+} from '@/services/agent-analytics-privacy';
 import { escapeHtml } from '@/utils/sanitize';
 import { buildEmbedIframeSnippet, buildEmbedMapUrl, type EmbedVariant } from '@/embed/embed-url';
 import { createSettingsButton } from '@/components/settings-button';
 import { overlayHistory, type OverlayId } from '@/utils/overlay-history';
 import { MobilePrimaryNav } from '@/app/mobile-primary-nav';
+import {
+  SPLIT_LAYOUT_MIN_WIDTH,
+  LEGACY_WEB_SPLIT_LAYOUT_MIN_WIDTH,
+  MAP_COL_DEFAULT_PERCENT,
+  clampMapColWidthPercent,
+  getVisualMapSide,
+  getMapColWidthBounds,
+  mapRightClassForVisualSide,
+  type MapVisualSide,
+} from '@/app/split-layout';
+import {
+  addResponsiveZoneListener,
+  removeResponsiveZoneListener,
+  type ResponsiveZoneListener,
+} from '@/app/responsive-zone-listener';
 import { stageVariantSelection } from '@/services/variant-panel-ownership';
 import { transferSourceGateOwnershipToUser as releaseSourceGateOwnership } from '@/services/source-cap';
 
@@ -269,7 +288,13 @@ export class EventHandlerManager implements AppModule {
   private boundMapEndResizeHandler: (() => void) | null = null;
   private boundMapResizeVisChangeHandler: (() => void) | null = null;
   private boundMapWidthResizeMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private boundMapWidthTouchMoveHandler: ((e: TouchEvent) => void) | null = null;
+  private boundMapWidthTouchEndHandler: ((e: TouchEvent) => void) | null = null;
+  private boundMapWidthMouseUpHandler: (() => void) | null = null;
+  private boundMapWidthVisChangeHandler: (() => void) | null = null;
+  private boundMapWidthWindowResizeHandler: (() => void) & { cancel(): void } | null = null;
   private boundMapWidthEndResizeHandler: (() => void) | null = null;
+  private mapSplitZoneListener: ResponsiveZoneListener | null = null;
   private boundMapFullscreenEscHandler: ((e: KeyboardEvent) => void) | null = null;
   private readonly registeredSearchButtons = new Set<string>();
   private boundSearchKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -282,6 +307,7 @@ export class EventHandlerManager implements AppModule {
   private boundMissionKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
   private boundEmbedModalKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
   private missionPresetPopover: HTMLElement | null = null;
+  private missionPresetReturnFocus: HTMLElement | null = null;
   private missionDataRefreshTimer: number | null = null;
   private authStateUnsubscribers: Array<() => void> = [];
   private proGateUnsubscribers: Array<() => void> = [];
@@ -292,13 +318,14 @@ export class EventHandlerManager implements AppModule {
   private clockIntervalId: ReturnType<typeof setInterval> | null = null;
 
   private readonly idlePauseMs = IDLE_PAUSE_MS;
-  private readonly debouncedUrlSync = debounce(() => {
+  private readonly writeUrlState = (): void => {
     const shareUrl = this.getShareUrl();
     if (!shareUrl) return;
     // Preserve the shared mobile-overlay marker while syncing map URL state;
     // replacing it with null makes Android Back skip the open sheet.
     try { history.replaceState(history.state, '', shareUrl); } catch { }
-  }, 250);
+  };
+  private readonly debouncedUrlSync = debounce(this.writeUrlState, 250);
 
   private readonly debouncedWebcamReload = debounce(() => {
     if (this.ctx.mapLayers?.webcams) {
@@ -336,11 +363,11 @@ export class EventHandlerManager implements AppModule {
    * enabled → true (no-op). Single source of truth for runtime panel-enable
    * so search-add and undo-restore stay in lockstep.
    */
-  enablePanelById(panelId: string): boolean {
+  enablePanelById(panelId: string, options?: { trackAnalytics?: boolean }): boolean {
     const config = this.ctx.panelSettings[panelId];
     if (!config) return false;
     if (config.enabled) return true;
-    if (!isProUser() && isFreePanelCapCounted(panelId)) {
+    if (!hasPremiumAccess(getAuthState()) && isFreePanelCapCounted(panelId)) {
       const enabledCount = countFreePanelCapUsage(this.ctx.panelSettings);
       if (enabledCount >= FREE_MAX_PANELS) {
         // Tell the user why nothing happened instead of failing silently.
@@ -351,7 +378,7 @@ export class EventHandlerManager implements AppModule {
       }
     }
     userSetPanelEnabled(config, true);
-    trackPanelToggled(panelId, true);
+    if (options?.trackAnalytics !== false) trackPanelToggled(panelId, true);
     saveToStorage(STORAGE_KEYS.panels, this.ctx.panelSettings);
     this.applyPanelSettings();
     this.ctx.unifiedSettings?.refreshPanelToggles();
@@ -477,11 +504,34 @@ export class EventHandlerManager implements AppModule {
       document.removeEventListener('mousemove', this.boundMapWidthResizeMoveHandler);
       this.boundMapWidthResizeMoveHandler = null;
     }
+    if (this.boundMapWidthTouchMoveHandler) {
+      document.removeEventListener('touchmove', this.boundMapWidthTouchMoveHandler);
+      this.boundMapWidthTouchMoveHandler = null;
+    }
+    if (this.boundMapWidthTouchEndHandler) {
+      document.removeEventListener('touchend', this.boundMapWidthTouchEndHandler);
+      document.removeEventListener('touchcancel', this.boundMapWidthTouchEndHandler);
+      this.boundMapWidthTouchEndHandler = null;
+    }
+    if (this.boundMapWidthMouseUpHandler) {
+      document.removeEventListener('mouseup', this.boundMapWidthMouseUpHandler);
+      this.boundMapWidthMouseUpHandler = null;
+    }
+    if (this.boundMapWidthVisChangeHandler) {
+      document.removeEventListener('visibilitychange', this.boundMapWidthVisChangeHandler);
+      this.boundMapWidthVisChangeHandler = null;
+    }
+    if (this.boundMapWidthWindowResizeHandler) {
+      this.boundMapWidthWindowResizeHandler.cancel();
+      window.removeEventListener('resize', this.boundMapWidthWindowResizeHandler);
+      this.boundMapWidthWindowResizeHandler = null;
+    }
     if (this.boundMapWidthEndResizeHandler) {
-      document.removeEventListener('mouseup', this.boundMapWidthEndResizeHandler);
       window.removeEventListener('blur', this.boundMapWidthEndResizeHandler);
       this.boundMapWidthEndResizeHandler = null;
     }
+    removeResponsiveZoneListener(this.mapSplitZoneListener);
+    this.mapSplitZoneListener = null;
     if (this.boundMapResizeVisChangeHandler) {
       document.removeEventListener('visibilitychange', this.boundMapResizeVisChangeHandler);
       this.boundMapResizeVisChangeHandler = null;
@@ -736,6 +786,7 @@ export class EventHandlerManager implements AppModule {
 
     this.setupMapResize();
     this.setupMapWidthResize();
+    this.setupMapSideToggle();
     this.setupMapPin();
 
     this.boundVisibilityHandler = () => {
@@ -864,6 +915,9 @@ export class EventHandlerManager implements AppModule {
 
   private openMissionPresetPopover(anchor: HTMLElement | null, mobile: boolean): void {
     this.closeMissionPresetPopover();
+    // The desktop trigger (#missionPresetBtn) is display:none on mobile, where the
+    // popover opens from the menu item instead, so remember the real opener.
+    this.missionPresetReturnFocus = anchor ?? document.getElementById('missionPresetBtn');
 
     const active = loadStoredMissionPreset();
     const popover = document.createElement('div');
@@ -972,9 +1026,17 @@ export class EventHandlerManager implements AppModule {
       this.missionPresetPopover.removeEventListener('keydown', this.boundMissionKeydownHandler);
       this.boundMissionKeydownHandler = null;
     }
+    const hadFocus = this.missionPresetPopover?.contains(document.activeElement) ?? false;
     this.missionPresetPopover?.remove();
     this.missionPresetPopover = null;
-    document.getElementById('missionPresetBtn')?.setAttribute('aria-expanded', 'false');
+    const trigger = document.getElementById('missionPresetBtn');
+    trigger?.setAttribute('aria-expanded', 'false');
+    // Removing the popover while focus was inside it drops focus to <body>;
+    // hand it back to whichever control opened it. Falling back to the desktop
+    // trigger keeps the pre-existing behavior when no opener was recorded.
+    const opener = this.missionPresetReturnFocus;
+    this.missionPresetReturnFocus = null;
+    if (hadFocus) (opener?.isConnected ? opener : trigger)?.focus();
   }
 
   private getMissionDefaultLayers(): MapLayers {
@@ -982,10 +1044,12 @@ export class EventHandlerManager implements AppModule {
   }
 
   private filterMissionLayersForCurrentRenderer(layers: MapLayers): MapLayers {
-    const renderer = this.ctx.map?.isGlobeMode?.() ? 'globe' : 'flat';
     const isDeckGLActive = this.ctx.map?.isDeckGLActive?.() ?? !this.ctx.isMobile;
+    const kind = this.ctx.map?.isGlobeMode?.()
+      ? 'globe'
+      : (isDeckGLActive ? 'deck' : 'svg');
     let filtered = this.filterMissionLayersForAvailableServices(
-      filterMissionLayersForRenderer(layers, renderer, isDeckGLActive, this.getMissionDefaultLayers()),
+      filterMissionLayersForRenderer(layers, kind, this.getMissionDefaultLayers()),
     );
     // #6045 — mission presets (e.g. Supply-Chain Risk) include resilienceScore.
     // Free users must not persist or apply locked layers through this path.
@@ -1189,10 +1253,9 @@ export class EventHandlerManager implements AppModule {
     //
     // view is intentionally excluded: all renderers set this.state.view
     // synchronously at the top of setView(), so the debounced read is always
-    // correct regardless of renderer. GlobeMap.onStateChanged is a no-op and
-    // SVG Map fires emitStateChange before the listener is installed — neither
-    // can rely on a later onStateChanged to drive the URL write, so they must
-    // use the immediate debounce path.
+    // correct regardless of renderer. The initial Globe/SVG view is applied
+    // before this listener is installed, so neither can rely on that earlier
+    // state change to drive the URL write; they need the immediate debounce.
     const { view, lat, lon, zoom, chokepoint } = this.ctx.initialUrlState ?? {};
     const urlHasAsyncFlyTo =
       (lat !== undefined && lon !== undefined) ||   // setCenter → flyTo (requires both)
@@ -1207,9 +1270,14 @@ export class EventHandlerManager implements AppModule {
     this.debouncedUrlSync();
   }
 
+  syncUrlStateNow(): void {
+    this.debouncedUrlSync.cancel();
+    this.writeUrlState();
+  }
+
   applyMapLayerChange(layer: keyof MapLayers, enabled: boolean, source: 'user' | 'programmatic'): void {
     console.log(`[App.onLayerChange] ${layer}: ${enabled} (${source})`);
-    trackMapLayerToggle(layer, enabled, source);
+    if (!isAgentAnalyticsSuppressed()) trackMapLayerToggle(layer, enabled, source);
     this.ctx.mapLayers[layer] = enabled;
     saveToStorage(STORAGE_KEYS.mapLayers, this.ctx.mapLayers);
     this.syncUrlState();
@@ -1441,20 +1509,31 @@ export class EventHandlerManager implements AppModule {
 
     renderDropdown();
 
+    // Keep the trigger's aria-expanded in sync however the dropdown closes
+    // (toggle click, outside click, Escape).
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const syncExpanded = () => btn.setAttribute('aria-expanded', String(dropdown.classList.contains('open')));
+
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdown.classList.toggle('open');
+      syncExpanded();
     });
 
     this.boundDropdownClickHandler = (e: MouseEvent) => {
       if (!dropdown.contains(e.target as Node) && !btn.contains(e.target as Node)) {
         dropdown.classList.remove('open');
+        syncExpanded();
       }
     };
     document.addEventListener('click', this.boundDropdownClickHandler);
 
     this.boundDropdownKeydownHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dropdown.classList.remove('open');
+      if (e.key === 'Escape') {
+        dropdown.classList.remove('open');
+        syncExpanded();
+      }
     };
     document.addEventListener('keydown', this.boundDropdownKeydownHandler);
   }
@@ -1866,6 +1945,9 @@ export class EventHandlerManager implements AppModule {
         removeStorageValue(this.ctx.PANEL_ORDER_KEY + '-bottom');
         removeStorageValue(this.ctx.PANEL_ORDER_KEY + '-bottom-set');
         removeStorageValue('map-height');
+        removeStorageValue('map-split-height');
+        removeStorageValue('map-col-width');
+        removeStorageValue('map-side');
         window.location.reload();
       },
       isDesktopApp: this.ctx.isDesktopApp,
@@ -2048,6 +2130,7 @@ export class EventHandlerManager implements AppModule {
         if (entry.isIntersecting && entry.intersectionRatio >= 0.3) {
           const id = (entry.target as HTMLElement).dataset.panel;
           if (id && !viewedPanels.has(id)) {
+            if (isAgentPanelViewSuppressed(id)) continue;
             viewedPanels.add(id);
             trackPanelView(id);
           }
@@ -2085,9 +2168,26 @@ export class EventHandlerManager implements AppModule {
     const resizeHandle = document.getElementById('mapResizeHandle');
     if (!mapSection || !resizeHandle || !mapContainer) return;
 
-    const getMinHeight = () => (window.innerWidth >= 1600 ? 280 : 350);
+    const isSplit = () => window.innerWidth >= SPLIT_LAYOUT_MIN_WIDTH;
+    // Split mode sizes #mapContainer, stacked mode sizes #mapSection — two
+    // different elements, so each mode keeps its own storage key (#6417).
+    const getHeightKey = () => (isSplit() ? 'map-split-height' : 'map-height');
+    const readSavedHeight = (): { value: string | null; sourceKey: string } => {
+      const key = getHeightKey();
+      const value = readStorageValue(key);
+      // Before the keys were mode-scoped both modes overwrote 'map-height';
+      // fall back to it so existing split-mode users keep their height. The
+      // restore below completes the migration by writing the split key.
+      const canUseLegacySplitHeight = this.ctx.isDesktopApp
+        || window.innerWidth >= LEGACY_WEB_SPLIT_LAYOUT_MIN_WIDTH;
+      if (value === null && isSplit() && canUseLegacySplitHeight) {
+        return { value: readStorageValue('map-height'), sourceKey: 'map-height' };
+      }
+      return { value, sourceKey: key };
+    };
+    const getMinHeight = () => (isSplit() ? 280 : 350);
     const getMaxHeight = () => {
-      if (window.innerWidth < 1600) return Math.max(getMinHeight(), window.innerHeight - 150);
+      if (!isSplit()) return Math.max(getMinHeight(), window.innerHeight - 150);
 
       const bottomGrid = document.getElementById('mapBottomGrid');
       const isEmpty = !bottomGrid || bottomGrid.children.length === 0;
@@ -2101,30 +2201,61 @@ export class EventHandlerManager implements AppModule {
       }
     };
 
-    const savedHeight = readStorageValue('map-height');
-    if (savedHeight) {
+    const getTarget = () => (isSplit() ? mapContainer : mapSection);
+    const getCurrentHeight = () => {
+      const target = getTarget();
+      const inlineHeight = Number.parseFloat(target.style.height);
+      return Number.isFinite(inlineHeight) ? inlineHeight : target.offsetHeight;
+    };
+    const syncHeightSeparatorAria = () => {
+      const target = getTarget();
+      const minHeight = getMinHeight();
+      const maxHeight = getMaxHeight();
+      const currentHeight = Math.max(minHeight, Math.min(getCurrentHeight(), maxHeight));
+      resizeHandle.setAttribute('aria-controls', target.id);
+      resizeHandle.setAttribute('aria-valuemin', String(Math.round(minHeight)));
+      resizeHandle.setAttribute('aria-valuemax', String(Math.round(maxHeight)));
+      resizeHandle.setAttribute('aria-valuenow', String(Math.round(currentHeight)));
+      resizeHandle.setAttribute('aria-valuetext', `${Math.round(currentHeight)} pixels`);
+    };
+
+    resizeHandle.tabIndex = 0;
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-orientation', 'horizontal');
+    resizeHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+
+    const applySavedHeight = () => {
+      const { value: savedHeight, sourceKey } = readSavedHeight();
+      if (!savedHeight) return;
       const numeric = Number.parseInt(savedHeight, 10);
       if (Number.isFinite(numeric)) {
         const clamped = Math.max(getMinHeight(), Math.min(numeric, getMaxHeight()));
-        if (window.innerWidth >= 1600) {
+        if (isSplit()) {
           mapContainer.style.flex = 'none';
           mapContainer.style.height = `${clamped}px`;
         } else {
           mapSection.style.height = `${clamped}px`;
         }
-        if (clamped !== numeric) {
-          writeStorageValue('map-height', `${clamped}px`);
+        // Persist when the value was clamped, or when it came from the
+        // legacy shared key — writing the mode key completes the migration
+        // so stacked-mode edits stop steering split restores.
+        if (clamped !== numeric || sourceKey !== getHeightKey()) {
+          writeStorageValue(getHeightKey(), `${clamped}px`);
         }
       } else {
-        removeStorageValue('map-height');
+        removeStorageValue(sourceKey);
       }
-    }
+    };
+    applySavedHeight();
+    syncHeightSeparatorAria();
 
     let isResizing = false;
     let startY = 0;
     let startHeight = 0;
-
-    const getTarget = () => (window.innerWidth >= 1600 ? mapContainer : mapSection);
+    // Captured at mousedown so a viewport crossing 900px mid-drag cannot
+    // switch the resized element or the storage key under the drag.
+    let dragTarget: HTMLElement | null = null;
+    let dragKey = 'map-height';
 
     this.boundMapEndResizeHandler = () => {
       if (!isResizing) return;
@@ -2133,15 +2264,35 @@ export class EventHandlerManager implements AppModule {
       this.ctx.map?.resize();
       mapSection.classList.remove('resizing');
       document.body.style.cursor = '';
-      writeStorageValue('map-height', getTarget().style.height);
+      writeStorageValue(dragKey, (dragTarget ?? getTarget()).style.height);
+      dragTarget = null;
+      syncHeightSeparatorAria();
     };
     const endResize = this.boundMapEndResizeHandler;
+
+    // Crossing the split threshold moves the height target between
+    // #mapContainer (split) and #mapSection (stacked). Finish an active drag
+    // before clearing the departing element so its captured key receives the
+    // last numeric height, then restore the arriving mode's preference.
+    this.mapSplitZoneListener = addResponsiveZoneListener(window, SPLIT_LAYOUT_MIN_WIDTH, () => {
+      endResize();
+      if (isSplit()) {
+        mapSection.style.height = '';
+      } else {
+        mapContainer.style.height = '';
+        mapContainer.style.flex = '';
+      }
+      applySavedHeight();
+      syncHeightSeparatorAria();
+      this.ctx.map?.resize();
+    });
 
     resizeHandle.addEventListener('mousedown', (e) => {
       isResizing = true;
       startY = e.clientY;
-      const target = getTarget();
-      startHeight = target.offsetHeight;
+      dragTarget = getTarget();
+      dragKey = getHeightKey();
+      startHeight = dragTarget.offsetHeight;
       this.ctx.map?.setIsResizing(true);
       mapSection.classList.add('resizing');
       document.body.style.cursor = 'ns-resize';
@@ -2149,8 +2300,9 @@ export class EventHandlerManager implements AppModule {
     });
 
     resizeHandle.addEventListener('dblclick', () => {
-      const isWide = window.innerWidth >= 1600;
+      const isWide = isSplit();
       const target = isWide ? mapContainer : mapSection;
+      const heightKey = getHeightKey();
 
       const targetHeight = window.innerHeight * 0.5;
       const finalHeight = Math.max(getMinHeight(), Math.min(targetHeight, getMaxHeight()));
@@ -2160,6 +2312,7 @@ export class EventHandlerManager implements AppModule {
 
       if (isWide) target.style.flex = 'none';
       target.style.height = `${finalHeight}px`;
+      syncHeightSeparatorAria();
 
       let fired = false;
       const onEnd = () => {
@@ -2168,9 +2321,10 @@ export class EventHandlerManager implements AppModule {
 
         target.classList.remove('map-section-smooth');
         target.removeEventListener('transitionend', onEnd);
-        writeStorageValue('map-height', `${finalHeight}px`);
+        writeStorageValue(heightKey, `${finalHeight}px`);
         this.ctx.map?.setIsResizing(false);
         this.ctx.map?.resize();
+        syncHeightSeparatorAria();
       };
 
       target.addEventListener('transitionend', onEnd);
@@ -2178,18 +2332,33 @@ export class EventHandlerManager implements AppModule {
       setTimeout(onEnd, 500);
     });
 
+    // Keyboard path (WAI-ARIA window-splitter): the drag strip is a focusable
+    // separator; arrow keys step the height and persist like a finished drag.
+    resizeHandle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const step = e.key === 'ArrowUp' ? -40 : e.key === 'ArrowDown' ? 40 : 0;
+      if (step === 0) return;
+      e.preventDefault();
+      const target = getTarget();
+      const newHeight = Math.max(getMinHeight(), Math.min(target.offsetHeight + step, getMaxHeight()));
+      if (isSplit()) target.style.flex = 'none';
+      target.style.height = `${newHeight}px`;
+      this.ctx.map?.resize();
+      writeStorageValue(getHeightKey(), `${newHeight}px`);
+      syncHeightSeparatorAria();
+    });
+
     this.boundMapResizeMoveHandler = (e: MouseEvent) => {
       if (!isResizing) return;
-      const isWide = window.innerWidth >= 1600;
-      const target = isWide ? mapContainer : mapSection;
+      const target = dragTarget ?? getTarget();
 
       const deltaY = e.clientY - startY;
       const newHeight = Math.max(getMinHeight(), Math.min(startHeight + deltaY, getMaxHeight()));
 
-      if (isWide) target.style.flex = 'none';
+      if (target === mapContainer) target.style.flex = 'none';
       target.style.height = `${newHeight}px`;
 
       this.ctx.map?.resize();
+      syncHeightSeparatorAria();
     };
     document.addEventListener('mousemove', this.boundMapResizeMoveHandler);
 
@@ -2206,15 +2375,72 @@ export class EventHandlerManager implements AppModule {
     const widthHandle = document.getElementById('mapWidthResizeHandle');
     if (!mainContent || !widthHandle) return;
 
-    const saved = readStorageValue('map-col-width');
-    if (saved) mainContent.style.setProperty('--map-col-width', saved);
+    const isMapRight = () => mainContent.classList.contains('map-right');
+    const isRtl = () => getComputedStyle(mainContent).direction === 'rtl';
+    // Under RTL the grid mirrors, so grid column 1 sits on the visual right:
+    // drag and arrow-key directions must follow the VISUAL side, not the class.
+    const isMapVisuallyRight = () => getVisualMapSide(isMapRight(), isRtl()) === 'right';
+    const getCurrentWidthPercent = () => {
+      const raw = mainContent.style.getPropertyValue('--map-col-width') || `${MAP_COL_DEFAULT_PERCENT}%`;
+      return clampMapColWidthPercent(Number.parseFloat(raw), mainContent.offsetWidth);
+    };
+    // The centered header clock overlaps the action buttons in a narrow map
+    // column; .map-col-narrow hides it (styles/main.css).
+    const syncMapColNarrowState = () => {
+      const mapSection = document.getElementById('mapSection');
+      if (!mapSection) return;
+      const sectionWidth = mapSection.offsetWidth;
+      mapSection.classList.toggle('map-col-narrow', sectionWidth > 0 && sectionWidth < 360);
+    };
+    const syncWidthSeparatorAria = () => {
+      const current = getCurrentWidthPercent();
+      const { minPct, maxPct } = getMapColWidthBounds(mainContent.offsetWidth);
+      const mapSection = document.getElementById('mapSection');
+      if (mapSection) widthHandle.setAttribute('aria-controls', mapSection.id);
+      widthHandle.setAttribute('aria-valuemin', String(Math.round(minPct)));
+      widthHandle.setAttribute('aria-valuemax', String(Math.round(maxPct)));
+      widthHandle.setAttribute('aria-valuenow', String(Math.round(current)));
+      widthHandle.setAttribute('aria-valuetext', `${Math.round(current)}%`);
+    };
+
+    widthHandle.tabIndex = 0;
+    widthHandle.setAttribute('role', 'separator');
+    widthHandle.setAttribute('aria-orientation', 'vertical');
+    widthHandle.setAttribute('aria-label', t('components.panel.dragToResize'));
+    widthHandle.title = t('components.panel.dragToResize');
+
+    // Re-derive the applied width from storage, clamped for the CURRENT
+    // container: a 75% saved on an ultrawide would otherwise crush the
+    // panels below their pixel floor in a narrow window. Storage keeps the
+    // user's raw preference — only the applied CSS var is clamped — so the
+    // wide value comes back when the window grows again.
+    const applyStoredWidth = () => {
+      const stored = readStorageValue('map-col-width') || mainContent.style.getPropertyValue('--map-col-width');
+      if (stored) {
+        const clamped = clampMapColWidthPercent(Number.parseFloat(stored), mainContent.offsetWidth);
+        mainContent.style.setProperty('--map-col-width', `${clamped.toFixed(1)}%`);
+      }
+      syncMapColNarrowState();
+      syncWidthSeparatorAria();
+    };
+    applyStoredWidth();
 
     let isResizing = false;
     let startX = 0;
     let startTotalWidth = 0;
     let startColPx = 0;
+    // Captured at drag start so a mid-gesture side toggle cannot invert the
+    // direction, and so a second input (mouse vs touch) cannot steal the drag.
+    let dragSign = 1;
+    let activeTouchId: number | null = null;
+    let activeDragSource: 'mouse' | 'touch' | null = null;
+    // Set only by applyDrag: a zero-movement press/tap must not persist the
+    // container-clamped application back over the raw stored preference.
+    let dragMoved = false;
 
     this.boundMapWidthEndResizeHandler = () => {
+      activeTouchId = null;
+      activeDragSource = null;
       if (!isResizing) return;
       isResizing = false;
       this.ctx.map?.setIsResizing(false);
@@ -2222,32 +2448,138 @@ export class EventHandlerManager implements AppModule {
       document.body.classList.remove('map-width-resizing');
       widthHandle.classList.remove('resizing');
       const current = mainContent.style.getPropertyValue('--map-col-width');
-      if (current) writeStorageValue('map-col-width', current);
+      if (current && dragMoved) writeStorageValue('map-col-width', current);
+      dragMoved = false;
+      syncMapColNarrowState();
+      syncWidthSeparatorAria();
     };
 
-    widthHandle.addEventListener('mousedown', (e) => {
+    const beginDrag = (clientX: number, source: 'mouse' | 'touch'): boolean => {
+      if (isResizing) return false;
       isResizing = true;
-      startX = e.clientX;
+      dragMoved = false;
+      activeDragSource = source;
+      startX = clientX;
       startTotalWidth = mainContent.offsetWidth;
-      const raw = mainContent.style.getPropertyValue('--map-col-width') || '60%';
-      startColPx = startTotalWidth * (parseFloat(raw) / 100);
+      startColPx = startTotalWidth * (getCurrentWidthPercent() / 100);
+      dragSign = isMapVisuallyRight() ? -1 : 1;
       this.ctx.map?.setIsResizing(true);
       document.body.classList.add('map-width-resizing');
       widthHandle.classList.add('resizing');
+      return true;
+    };
+    // With the map visually on the right, moving the divider left grows it.
+    const applyDrag = (clientX: number) => {
+      const delta = (clientX - startX) * dragSign;
+      const newPct = clampMapColWidthPercent(((startColPx + delta) / startTotalWidth) * 100, startTotalWidth);
+      mainContent.style.setProperty('--map-col-width', `${newPct.toFixed(1)}%`);
+      dragMoved = true;
+      this.ctx.map?.resize();
+      syncMapColNarrowState();
+      syncWidthSeparatorAria();
+    };
+
+    widthHandle.addEventListener('mousedown', (e) => {
+      if (beginDrag(e.clientX, 'mouse')) e.preventDefault();
+    });
+
+    widthHandle.addEventListener('touchstart', (e: TouchEvent) => {
+      const touch = e.changedTouches[0];
+      if (!touch || !beginDrag(touch.clientX, 'touch')) return;
+      activeTouchId = touch.identifier;
       e.preventDefault();
+    }, { passive: false });
+
+    // Keyboard path, mirroring the height handle above. Arrows move the
+    // DIVIDER, so ArrowRight shrinks a visually-right map.
+    widthHandle.addEventListener('keydown', (e: KeyboardEvent) => {
+      const arrow = e.key === 'ArrowLeft' ? -5 : e.key === 'ArrowRight' ? 5 : 0;
+      if (arrow === 0) return;
+      e.preventDefault();
+      const step = isMapVisuallyRight() ? -arrow : arrow;
+      const newPct = clampMapColWidthPercent(getCurrentWidthPercent() + step, mainContent.offsetWidth);
+      const value = `${newPct.toFixed(1)}%`;
+      mainContent.style.setProperty('--map-col-width', value);
+      this.ctx.map?.resize();
+      writeStorageValue('map-col-width', value);
+      syncMapColNarrowState();
+      syncWidthSeparatorAria();
     });
 
     this.boundMapWidthResizeMoveHandler = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const delta = e.clientX - startX;
-      const newPct = Math.max(25, Math.min(75, ((startColPx + delta) / startTotalWidth) * 100));
-      mainContent.style.setProperty('--map-col-width', `${newPct.toFixed(1)}%`);
-      this.ctx.map?.resize();
+      if (!isResizing || activeDragSource !== 'mouse') return;
+      applyDrag(e.clientX);
     };
+    this.boundMapWidthTouchMoveHandler = (e: TouchEvent) => {
+      if (!isResizing || activeDragSource !== 'touch' || activeTouchId === null) return;
+      const touch = Array.from(e.touches).find(t => t.identifier === activeTouchId);
+      if (!touch) return;
+      applyDrag(touch.clientX);
+    };
+    // Only the tracked finger ends a touch drag — another finger lifting
+    // elsewhere on the page must not cut the resize short.
+    this.boundMapWidthTouchEndHandler = (e: TouchEvent) => {
+      if (activeDragSource !== 'touch' || activeTouchId === null) return;
+      if (!Array.from(e.changedTouches).some(t => t.identifier === activeTouchId)) return;
+      this.boundMapWidthEndResizeHandler?.();
+    };
+    this.boundMapWidthMouseUpHandler = () => {
+      if (activeDragSource === 'mouse') this.boundMapWidthEndResizeHandler?.();
+    };
+    // Mirror the height handle: a hidden tab must not leave a drag latched.
+    this.boundMapWidthVisChangeHandler = () => {
+      if (document.hidden) this.boundMapWidthEndResizeHandler?.();
+    };
+    // Window resizes change the container the stored percentage resolves
+    // against: re-clamp the applied width and refresh the narrow state.
+    this.boundMapWidthWindowResizeHandler = debounce(() => {
+      if (isResizing) return;
+      applyStoredWidth();
+    }, 150);
 
     document.addEventListener('mousemove', this.boundMapWidthResizeMoveHandler);
-    document.addEventListener('mouseup', this.boundMapWidthEndResizeHandler);
+    document.addEventListener('mouseup', this.boundMapWidthMouseUpHandler);
+    document.addEventListener('touchmove', this.boundMapWidthTouchMoveHandler);
+    document.addEventListener('touchend', this.boundMapWidthTouchEndHandler);
+    document.addEventListener('touchcancel', this.boundMapWidthTouchEndHandler);
+    document.addEventListener('visibilitychange', this.boundMapWidthVisChangeHandler);
+    window.addEventListener('resize', this.boundMapWidthWindowResizeHandler);
     window.addEventListener('blur', this.boundMapWidthEndResizeHandler);
+  }
+
+  setupMapSideToggle(): void {
+    const mainContent = document.querySelector<HTMLElement>('.main-content');
+    const sideBtn = document.getElementById('mapSideBtn');
+    if (!mainContent || !sideBtn) return;
+
+    const isRtl = () => getComputedStyle(mainContent).direction === 'rtl';
+    const getVisualSide = () => getVisualMapSide(
+      mainContent.classList.contains('map-right'),
+      isRtl(),
+    );
+    const syncSideButton = () => {
+      const visualSide = getVisualSide();
+      const label = visualSide === 'right' ? 'Move map to the left side' : 'Move map to the right side';
+      sideBtn.title = label;
+      sideBtn.setAttribute('aria-label', label);
+      sideBtn.classList.toggle('active', visualSide === 'right');
+    };
+
+    const storedSide = readStorageValue('map-side');
+    if (storedSide === 'left' || storedSide === 'right') {
+      mainContent.classList.toggle(
+        'map-right',
+        mapRightClassForVisualSide(storedSide as MapVisualSide, isRtl()),
+      );
+    }
+    syncSideButton();
+
+    sideBtn.addEventListener('click', () => {
+      mainContent.classList.toggle('map-right');
+      writeStorageValue('map-side', getVisualSide());
+      syncSideButton();
+      this.ctx.map?.resize();
+    });
   }
 
   setupMapPin(): void {

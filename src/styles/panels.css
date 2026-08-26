@@ -2145,6 +2145,11 @@
   margin: -10px -4px;
 }
 
+.wc-drag-handle:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
 .wc-drag-handle:hover {
   color: var(--text-dim);
 }
@@ -2830,8 +2835,13 @@ body.panel-drag-active .map-bottom-grid:empty::after {
   border-top-color: var(--accent);
 }
 
-/* Hide drop zone completely on smaller screens (overridden by media query in main.css) */
-@media (max-width: 1599px) {
+/* Hide the drop zone below the split threshold. 899px mirrors
+   SPLIT_LAYOUT_MIN_WIDTH (src/app/split-layout.ts), one threshold for web
+   and desktop since #6417 — from that width up, ensureCorrectZones() moves
+   saved bottom-set panels INTO this container, so hiding it any higher
+   makes those panels vanish (#6426).
+   tests/responsive-zone-listener.test.mjs pins the alignment. */
+@media (max-width: 899px) {
   .map-bottom-grid {
     display: none !important;
   }
@@ -3863,4 +3873,11 @@ a.hub-top-story {
   font-size: calc(9px * var(--wm-panel-effective-scale, 1));
   color: var(--negative, #f87171);
   opacity: 0.85;
+}
+
+/* Focus ring for search inputs whose base rules suppress the outline (#6573). */
+.watchlist-search:focus-visible,
+.wl-search input:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }

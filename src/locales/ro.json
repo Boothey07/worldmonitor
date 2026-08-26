@@ -67,6 +67,19 @@
       "stable": "Stabil"
     },
     "militaryActivity": "Activitate militară",
+    "defenseIndustrial": {
+      "title": "Defense Industrial Base",
+      "expenditure": "Military spend",
+      "personnel": "Personnel",
+      "armsImports": "Arms imports",
+      "concentration": "Supplier HHI",
+      "suppliers": "Arms suppliers ({{start}}–{{end}})",
+      "source": "Sources: World Bank and SIPRI Arms Transfers Database. TIV measures transfer volume, not financial value.",
+      "sourceWorldBank": "Source: World Bank.",
+      "unavailable": "Not available",
+      "coverage": "Mapped coverage",
+      "supplierRetained": "Supplier data retained from the last successful importer refresh."
+    },
     "economicIndicators": "Indicatori Economici",
     "ownFlights": "Zboruri proprii",
     "foreignFlights": "Zboruri în străinătate",
@@ -179,6 +192,48 @@
       "corridorConditions": "Condiții de coridor",
       "activityNowcast": "Previziune activitate curentă",
       "decisionSignalsUnavailable": "Instantaneul semnalelor de decizie ale Chinei este momentan indisponibil."
+    },
+    "foodStocks": "Food stocks",
+    "foodStocksHelp": "USDA PSD commodity stocks-to-use by marketing year, with the world ratio alongside for context. FAOSTAT fills production only where PSD has no country coverage.",
+    "loadingFoodStocks": "Loading food stocks…",
+    "foodStocksUnavailable": "Food stocks unavailable.",
+    "foodStocksProLocked": "Upgrade to PRO for commodity stocks-to-use",
+    "foodStocksCommodity": "Commodity",
+    "foodStocksMarketingYear": "Marketing year",
+    "foodStocksRatio": "Stocks-to-use",
+    "foodStocksWorld": "World",
+    "commodities": {
+      "wheat": "Wheat",
+      "corn": "Corn",
+      "rice": "Rice",
+      "soybeans": "Soybeans",
+      "barley": "Barley",
+      "palmOil": "Palm oil"
+    },
+    "demographicsCapability": {
+      "title": "Demographics & Workforce",
+      "help": "Age structure, education pipeline, and industrial workforce capacity from UN WPP, UNESCO UIS and World Bank WDI, and ILOSTAT.",
+      "loading": "Loading demographics and workforce data…",
+      "unavailable": "Demographics and workforce data unavailable.",
+      "proLocked": "Upgrade to PRO for demographics and workforce data",
+      "notAvailable": "Not available",
+      "ageStructure": "Age structure",
+      "education": "Education pipeline",
+      "industrialWorkforce": "Industrial workforce",
+      "medianAge": "Median age",
+      "oldAgeDependency": "Old-age dependency",
+      "totalDependency": "Total dependency",
+      "workingAgePopulation": "Working-age population",
+      "workingAgeProjection": "Working-age population (+10 years)",
+      "tertiaryEnrollment": "Tertiary enrollment",
+      "stemGraduates": "STEM graduates",
+      "researchers": "Researchers",
+      "craftTrades": "Craft and trades workers",
+      "plantOperators": "Plant and machine operators",
+      "trainedIndustrialWorkforce": "Combined industrial workforce",
+      "manufacturingShare": "Manufacturing employment",
+      "source": "Sources: {{sources}}.",
+      "retained": "{{stage}} data retained from the last successful refresh."
     }
   },
   "header": {
@@ -310,6 +365,7 @@
     "securityAdvisories": "Aviz de securitate",
     "orefSirens": "Sirene Israel",
     "telegramIntel": "Telegram Intel",
+    "xIntel": "X News Accounts",
     "startups": "Startup-uri & VC",
     "vcblogs": "Analize VC",
     "regionalStartups": "Știri globale startup-uri",
@@ -448,7 +504,9 @@
         "displacement": "Comutați fluxurile de deplasare",
         "climate": "Comutați anomaliile climatice",
         "outages": "Comutați întreruperile de internet",
-        "tradeRoutes": "Comutați rutele comerciale"
+        "tradeRoutes": "Comutați rutele comerciale",
+        "canadaRoads": "Toggle Canada roads overlay",
+        "canadaAlerts": "Toggle Canada provincial emergency alerts overlay"
       },
       "view": {
         "dark": "Comutați în mod întunecat",
@@ -610,7 +668,7 @@
         "URLHAUS_AUTH_KEY": "Folosit atât pentru URLhaus, cât și pentru API-urile ThreatFox.",
         "OTX_API_KEY": "Sursă opțională de îmbogățire pentru stratul de amenințări cibernetice.",
         "ABUSEIPDB_API_KEY": "Sursă opțională de îmbogățire pentru reputația IP rău intenționată.",
-        "FINNHUB_API_KEY": "Cotații bursiere și date de piață în timp real.",
+        "FINNHUB_API_KEY": "Cotații bursiere întârziate sau preîncărcate și date de piață. O cheie nu este un flux live.",
         "NASA_FIRMS_API_KEY": "Informații de incendiu pentru sistemul de management al resurselor.",
         "OLLAMA_API_URL": "de ex. http://127.0.0.1:11434 (Ollama) sau http://127.0.0.1:1234/v1 (LM Studio) — punct final compatibil cu OpenAI.",
         "OLLAMA_MODEL": "de ex. llama3.1:8b — etichetă model de utilizat pentru rezumat."
@@ -854,7 +912,12 @@
       "loadingHistory": "Se încarcă istoricul tranzitului…",
       "historyUnavailable": "Istoricul tranzitului indisponibil",
       "transitDataUnavailable": "Date tranzit indisponibile (parțial din amonte)",
-      "infoTooltip": "<strong>Supply Chain Monitor</strong> Urmărirea logistică și a resurselor globale:<ul><li><strong>Puncte critice</strong>: Starea tranzitului maritim, scoruri de perturbație și numărătoare nave</li><li><strong>Transport maritim</strong>: Baltic Dry Index și tendințe rate fret</li><li><strong>Minerale</strong>: Risc concentrare minerale critice (HHI) și producători principali</li></ul>Faceți clic pe o carte cu punct critic pentru a extinde graficul istoricului tranzitului."
+      "infoTooltip": "<strong>Supply Chain Monitor</strong> Urmărirea logistică și a resurselor globale:<ul><li><strong>Puncte critice</strong>: Starea tranzitului maritim, scoruri de perturbație și numărătoare nave</li><li><strong>Transport maritim</strong>: Baltic Dry Index și tendințe rate fret</li><li><strong>Minerale</strong>: Risc concentrare minerale critice (HHI) și producători principali</li></ul>Faceți clic pe o carte cu punct critic pentru a extinde graficul istoricului tranzitului.",
+      "mineStage": "Mine",
+      "refineryStage": "Refine",
+      "stageUnavailable": "No published figures for this stage",
+      "withheldNote": "W withheld",
+      "productionCaption": "Country shares of actual production. The map deposits layer shows where resources sit; this table shows who mines or refines them."
     },
     "tradePolicy": {
       "tariffs": "Tarife vamale",
@@ -898,6 +961,7 @@
       "noComtradeData": "Nu sunt disponibile date privind fluxurile strategice",
       "comtradeUnavailable": "Datele ONU Comtrade sunt temporar indisponibile",
       "sourceComtrade": "ONU Comtrade",
+      "comtradeNationalScope": "UN Comtrade rows are national-level official statistics for the reporting country. They are not a town, corridor, factory, port, or shipment export ledger.",
       "anomalyBadge": "Anomalie",
       "colReporter": "Țară",
       "colCommodity": "Materie primă",
@@ -1134,7 +1198,7 @@
         "ucdpEvents": "Evenimente de conflict armat",
         "displacementFlows": "Fluxuri de deplasare",
         "climateAnomalies": "Anomalii climatice",
-        "weatherAlerts": "Alerte meteo pentru SUA (NWS)",
+        "weatherAlerts": "Alerte de vreme severă (NWS, ECCC, WMO SWIC)",
         "strategicWaterways": "Căi navigabile strategice",
         "economicCenters": "Centre Economice",
         "criticalMinerals": "Minerale critice",
@@ -1154,7 +1218,9 @@
         "speciesRecovery": "Recuperarea speciilor",
         "renewableInstallations": "Energie curată",
         "radiationSpike": "Vârf de radiații",
-        "radiationElevated": "Radiații ridicate"
+        "radiationElevated": "Radiații ridicate",
+        "canadaRoads": "Canada Roads",
+        "canadaAlerts": "Canada Alerts (AB + BC + SK)"
       },
       "tooltip": {
         "earthquake": "Cutremur",
@@ -1215,7 +1281,7 @@
           "infraDatacenters": "Clustere de calcul AI >=10.000 de GPU",
           "infraOutages": "Întreruperea internetului și întreruperile serviciului",
           "naturalEventsTech": "Cutremururi, furtuni, incendii (pot afecta centrele de date)",
-          "weatherAlerts": "Alerte de vreme severă în SUA (NWS)",
+          "weatherAlerts": "Alerte oficiale de vreme severă de la serviciile meteorologice naționale (NWS, ECCC, WMO SWIC)",
           "economicCenters": "Burse de valori și bănci centrale",
           "countriesOverlay": "Numele țării se suprapune",
           "financeExchanges": "Schimburile globale majore pe nivelul pieței",
@@ -1227,7 +1293,7 @@
           "financeOutages": "Întreruperi ale internetului care pot afecta operațiunile pieței",
           "financeCyberThreats": "Evenimente de securitate în jurul infrastructurii financiare",
           "macroWaterways": "Puncte de strangulare strategice pentru transportul mărfurilor",
-          "weatherAlertsMarket": "Evenimente meteorologice severe din SUA cu relevanță pentru piață (NWS)",
+          "weatherAlertsMarket": "Alerte oficiale de vreme severă cu relevanță pentru piață (NWS, ECCC, WMO SWIC)",
           "naturalEventsMacro": "Cutremurele, incendiile, inundațiile și alte perturbări naturale",
           "timeRecent": "Filtrați datele bazate pe timp la ultimele ore",
           "timeExtended": "Afișați datele din săptămâna trecută, din luna sau din toate timpurile",
@@ -1260,7 +1326,9 @@
           "tradeRoutes": "Principalele linii maritime globale care conectează porturile prin puncte strategice de blocare",
           "dayNight": "Terminator solar în timp real care arată zonele de zi și de noapte",
           "geoBoundaries": "Zone demilitarizate, linii de încetare a focului și granițe disputate",
-          "ciiChoropleth": "Harta termică a instabilității — colorează țările după scorul CII (verde=stabil, roșu=critic)"
+          "ciiChoropleth": "Harta termică a instabilității — colorează țările după scorul CII (verde=stabil, roșu=critic)",
+          "canadaRoads": "Official road incidents, alerts, conditions, closures, construction, and hazards across supported Canadian jurisdictions",
+          "canadaAlerts": "Provincial public-safety alerts from Alberta Emergency Alert, B.C. Evacuation Orders and Alerts, and SaskAlert"
         },
         "notes": {
           "timeAffects": "Afectează: cutremure, vreme, proteste, întreruperi"
@@ -1637,7 +1705,9 @@
     "breakingNews": {
       "critical": "CRITIC",
       "high": "RIDICAT",
-      "dismiss": "Respingeți"
+      "dismiss": "Respingeți",
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "Alerte de ultimă oră",
@@ -1696,6 +1766,21 @@
       "live": "ÎN DIRECT",
       "viewSource": "Vezi sursa",
       "filterGeopolitics": "Geopolitică",
+      "filterCyber": "Cyber"
+    },
+    "xIntel": {
+      "infoTooltip": "Curated public news-account posts from X. Official API only.",
+      "loading": "Connecting to X news-account relay...",
+      "empty": "No posts available",
+      "disabled": "X news-account relay not active",
+      "filterAll": "All",
+      "filterBreaking": "Breaking",
+      "filterConflict": "Conflict",
+      "filterOsint": "OSINT",
+      "filterMiddleeast": "Middle East",
+      "live": "LIVE",
+      "viewSource": "View Source",
+      "filterGeopolitics": "Geopolitics",
       "filterCyber": "Cyber"
     },
     "investments": {
@@ -1874,13 +1959,23 @@
       "topTargets": "Țări țintă principale"
     },
     "commodities": {
-      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress."
+      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress.",
+      "commodities": "Commodities",
+      "physicalPremiums": "Physical premium",
+      "physical": "Physical",
+      "paper": "Paper",
+      "premium": "Premium",
+      "asOf": "As of {{date}}",
+      "metals": {
+        "gold": "Gold",
+        "silver": "Silver"
+      }
     },
     "crypto": {
       "infoTooltip": "<strong>Crypto</strong> Live prices, 24h changes, and volume for major cryptocurrencies. Data sourced from CoinGecko."
     },
     "gulfEconomies": {
-      "infoTooltip": "<strong>Gulf Economies</strong> Real-time Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
+      "infoTooltip": "<strong>Gulf Economies</strong> Seeded Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
     },
     "groceryBasket": {
       "infoTooltip": "<strong>Grocery Index</strong> Global grocery basket price comparison across 24 countries — tracks real-world consumer goods inflation beyond headline CPI."
@@ -2148,7 +2243,7 @@
       "infoTooltip": "<strong>Disaster Cascade</strong> Detectează semnale convergente de dezastre naturale și infrastructură:<ul><li>Corelează cutremure, incendii de vegetație, inundații și extremuri meteo</li><li>Urmărește efectele în cascadă asupra infrastructurii și lanțurilor de aprovizionare</li><li>Evidențiază regiuni cu risc de dezastru compus</li></ul>Faceți clic pe o carte pentru a mări regiunea afectată."
     },
     "markets": {
-      "infoTooltip": "<strong>Markets</strong> Indici bursieri în timp real, acțiuni și prețuri crypto. Personalizați lista de urmărire cu butonul Watchlist. Sparkline-urile arată tendința recentă de preț.",
+      "infoTooltip": "<strong>Markets</strong> Indici bursieri întârziați sau preîncărcați, acțiuni și prețuri crypto. Personalizați lista de urmărire cu butonul Watchlist. Sparkline-urile arată tendința recentă de preț.",
       "chart": {
         "title": "Grafic prețuri {{symbol}}",
         "close": "Închide graficul"
@@ -2329,13 +2424,14 @@
     },
     "sanctionsPressure": {
       "title": "Sancțiuni și Desemnări",
-      "infoTooltip": "Desemnări sancțiuni OFAC din listele SDN și Consolidated. Arată ce țări se confruntă cu cea mai mare presiune de desemnare, ce programe o determină și ce a fost adăugat recent de la ultima actualizare.",
+      "infoTooltip": "Listele SDN și Consolidated OFAC plus desemnările SEMA/JVCFOA ale Global Affairs Canada. Arată ce țări se confruntă cu cea mai mare presiune de desemnare, ce programe o determină și ce a fost adăugat recent de la ultima actualizare.",
       "loading": "Se încarcă datele sancțiunilor...",
       "unavailable": "Datele sancțiunilor nu sunt disponibile.",
       "summary": {
         "new": "Nou",
         "vessels": "Nave",
-        "aircraft": "Aeronave"
+        "aircraft": "Aeronave",
+        "sema": "SEMA"
       },
       "sections": {
         "countries": "Țări sancționate",
@@ -2350,11 +2446,12 @@
       "footer": {
         "updated": "Actualizat {{time}}",
         "dataset": "set de date {{date}}",
-        "source": "Sursă: OFAC"
+        "source": "Sursă: OFAC · GAC SEMA"
       },
       "pills": {
         "newCount": "+{{count}} nou",
-        "new": "nou"
+        "new": "nou",
+        "sema": "sema-ca"
       },
       "designations_one": "{{count}} desemnare",
       "designations_other": "{{count}} desemnări",
@@ -2809,6 +2906,7 @@
     "moreEvents": "mai multe evenimente",
     "monitoring": "Monitorizare",
     "viewUSGS": "Vizualizare pe USGS",
+    "viewNRCan": "Vizualizare pe Earthquakes Canada",
     "expired": "A expirat",
     "timeAgo": {
       "s": "Acum {{count}}",
@@ -2928,7 +3026,11 @@
       "heading": "TITUL",
       "hexCode": "COD HEX",
       "squawk": "SQUAWK",
-      "attribution": "Sursa: adsb.lol (ODbL) · OpenSky Network"
+      "attribution": "Sursa: adsb.lol (ODbL) · OpenSky Network",
+      "climbRate": "RATA DE URCARE",
+      "manufacturer": "PRODUCĂTOR",
+      "owner": "PROPRIETAR",
+      "builtYear": "AN FABRICAȚIE"
     },
     "militaryVessel": {
       "aisDark": "AIS ÎNTUNEC",
@@ -2973,7 +3075,8 @@
       "moreVessels": "+{{count}} mai multe vase",
       "vesselsCount": "{{count}} NAVE",
       "vessels": "NAVE",
-      "trackedVessels": "NAVE ȘENILE"
+      "trackedVessels": "NAVE ȘENILE",
+      "showLess": "Afișează mai puțin"
     },
     "naturalEvent": {
       "closed": "ÎNCHIS",
@@ -3239,7 +3342,8 @@
     "retry": "Reîncercați",
     "refresh": "Actualizează",
     "all": "Toate",
-    "cancel": "Anulare"
+    "cancel": "Anulare",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "Afișare",
@@ -3261,7 +3365,9 @@
     "fontFamily": "Familie de fonturi",
     "fontFamilyDesc": "Monospace pentru aspect tehnic, font implicit pentru citire mai ușoară.",
     "fontMono": "Monospace",
-    "fontSystem": "Font implicit"
+    "fontSystem": "Font implicit",
+    "panelFontScale": "Dimensiune text",
+    "followGlobalFontScale": "Utilizează setarea globală"
   },
   "contextMenu": {
     "openCountryBrief": "Deschide prezentarea țării",
@@ -3352,7 +3458,9 @@
       "orefSirens1": "Alerte în timp real pentru rachete și rachete Israel",
       "orefSirens2": "Hartă zonelor de sirenă cu clasificare amenințărilor",
       "telegramIntel1": "Canale Telegram OSINT curate",
-      "telegramIntel2": "Actualizări conflicte și geopolitice aproape în timp real"
+      "telegramIntel2": "Actualizări conflicte și geopolitice aproape în timp real",
+      "xIntel1": "Curated public news accounts on X",
+      "xIntel2": "API-fresh posts with official permalinks"
     }
   },
   "auth": {

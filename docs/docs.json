@@ -85,6 +85,7 @@
                 "pages": [
                   "overview",
                   "features",
+                  "data-sources",
                   "global-procurement-intelligence",
                   "hotspots"
                 ]
@@ -100,6 +101,7 @@
                   "china-logistics-corridors",
                   "methodology/china-activity-nowcast",
                   "methodology/news-digest-and-briefing",
+                  "methodology/news-credibility",
                   "country-instability-index",
                   "methodology/country-resilience-index",
                   "methodology/chokepoints",
@@ -180,6 +182,7 @@
                   "panels/monitors",
                   "panels/oref-sirens",
                   "panels/telegram-intel",
+                  "panels/x-intel",
                   "panels/fsi"
                 ]
               },
@@ -205,6 +208,7 @@
                   "cli",
                   "sdks",
                   "mcp-overview",
+                  "webmcp",
                   "mcp-apps",
                   "mcp-tools-reference",
                   "mcp-jmespath",
@@ -238,7 +242,7 @@
                   "relay-parameters",
                   "decision-signal-provenance",
                   "china-decision-signals",
-                  "data-sources"
+                  "source-attribution"
                 ]
               },
               {
@@ -250,16 +254,19 @@
               {
                 "group": "Legal",
                 "pages": [
+                  "eula",
+                  "terms",
+                  "dpa",
                   "license",
                   "trademark-policy",
-                  "privacy",
-                  "terms"
+                  "privacy"
                 ]
               }
             ]
           },
           {
             "tab": "API Reference",
+            "openapi": "api/worldmonitor.openapi.yaml",
             "groups": [
               {
                 "group": "Overview",
@@ -550,6 +557,7 @@
                 "pages": [
                   "zh/overview",
                   "zh/features",
+                  "zh/data-sources",
                   "zh/hotspots"
                 ]
               },
@@ -564,6 +572,7 @@
                   "zh/china-logistics-corridors",
                   "zh/methodology/china-activity-nowcast",
                   "zh/methodology/news-digest-and-briefing",
+                  "zh/methodology/news-credibility",
                   "zh/country-instability-index",
                   "zh/methodology/country-resilience-index",
                   "zh/methodology/chokepoints",
@@ -644,6 +653,7 @@
                   "zh/panels/monitors",
                   "zh/panels/oref-sirens",
                   "zh/panels/telegram-intel",
+                  "zh/panels/x-intel",
                   "zh/panels/fsi"
                 ]
               },
@@ -669,6 +679,7 @@
                   "zh/cli",
                   "zh/sdks",
                   "zh/mcp-overview",
+                  "zh/webmcp",
                   "zh/mcp-apps",
                   "zh/mcp-tools-reference",
                   "zh/mcp-jmespath",
@@ -702,7 +713,7 @@
                   "zh/relay-parameters",
                   "zh/decision-signal-provenance",
                   "zh/china-decision-signals",
-                  "zh/data-sources"
+                  "zh/source-attribution"
                 ]
               },
               {
@@ -714,16 +725,19 @@
               {
                 "group": "法律",
                 "pages": [
+                  "zh/eula",
+                  "zh/terms",
+                  "zh/dpa",
                   "zh/license",
                   "zh/trademark-policy",
-                  "zh/privacy",
-                  "zh/terms"
+                  "zh/privacy"
                 ]
               }
             ]
           },
           {
             "tab": "API 参考",
+            "openapi": "api/worldmonitor.openapi.yaml",
             "groups": [
               {
                 "group": "概览",

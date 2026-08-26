@@ -67,6 +67,19 @@
       "stable": "稳定"
     },
     "militaryActivity": "军事活动",
+    "defenseIndustrial": {
+      "title": "Defense Industrial Base",
+      "expenditure": "Military spend",
+      "personnel": "Personnel",
+      "armsImports": "Arms imports",
+      "concentration": "Supplier HHI",
+      "suppliers": "Arms suppliers ({{start}}–{{end}})",
+      "source": "Sources: World Bank and SIPRI Arms Transfers Database. TIV measures transfer volume, not financial value.",
+      "sourceWorldBank": "Source: World Bank.",
+      "unavailable": "Not available",
+      "coverage": "Mapped coverage",
+      "supplierRetained": "Supplier data retained from the last successful importer refresh."
+    },
     "economicIndicators": "经济指标",
     "ownFlights": "本国航班",
     "foreignFlights": "外国航班",
@@ -152,9 +165,7 @@
       "energyMix": "电力结构",
       "coal": "煤炭",
       "noMajorDisruptions": "未报告重大中断",
-      "activeDisruptions_one": "{{count}} 起活跃中断",
       "activeDisruptions_other": "{{count}} 起活跃中断",
-      "activeSignals_one": "{{count}} 个活跃信号",
       "activeSignals_other": "{{count}} 个活跃信号",
       "aviationSource": "航空监测",
       "hazardSource": "国家情报信号",
@@ -177,6 +188,48 @@
       "corridorConditions": "通道状况",
       "activityNowcast": "活动即时预测",
       "decisionSignalsUnavailable": "中国决策信号快照当前不可用。"
+    },
+    "foodStocks": "Food stocks",
+    "foodStocksHelp": "USDA PSD commodity stocks-to-use by marketing year, with the world ratio alongside for context. FAOSTAT fills production only where PSD has no country coverage.",
+    "loadingFoodStocks": "Loading food stocks…",
+    "foodStocksUnavailable": "Food stocks unavailable.",
+    "foodStocksProLocked": "Upgrade to PRO for commodity stocks-to-use",
+    "foodStocksCommodity": "Commodity",
+    "foodStocksMarketingYear": "Marketing year",
+    "foodStocksRatio": "Stocks-to-use",
+    "foodStocksWorld": "World",
+    "commodities": {
+      "wheat": "Wheat",
+      "corn": "Corn",
+      "rice": "Rice",
+      "soybeans": "Soybeans",
+      "barley": "Barley",
+      "palmOil": "Palm oil"
+    },
+    "demographicsCapability": {
+      "title": "Demographics & Workforce",
+      "help": "Age structure, education pipeline, and industrial workforce capacity from UN WPP, UNESCO UIS and World Bank WDI, and ILOSTAT.",
+      "loading": "Loading demographics and workforce data…",
+      "unavailable": "Demographics and workforce data unavailable.",
+      "proLocked": "Upgrade to PRO for demographics and workforce data",
+      "notAvailable": "Not available",
+      "ageStructure": "Age structure",
+      "education": "Education pipeline",
+      "industrialWorkforce": "Industrial workforce",
+      "medianAge": "Median age",
+      "oldAgeDependency": "Old-age dependency",
+      "totalDependency": "Total dependency",
+      "workingAgePopulation": "Working-age population",
+      "workingAgeProjection": "Working-age population (+10 years)",
+      "tertiaryEnrollment": "Tertiary enrollment",
+      "stemGraduates": "STEM graduates",
+      "researchers": "Researchers",
+      "craftTrades": "Craft and trades workers",
+      "plantOperators": "Plant and machine operators",
+      "trainedIndustrialWorkforce": "Combined industrial workforce",
+      "manufacturingShare": "Manufacturing employment",
+      "source": "Sources: {{sources}}.",
+      "retained": "{{stage}} data retained from the last successful refresh."
     }
   },
   "header": {
@@ -308,6 +361,7 @@
     "securityAdvisories": "安全警告",
     "orefSirens": "Israel Sirens",
     "telegramIntel": "Telegram 情报",
+    "xIntel": "X News Accounts",
     "startups": "创业公司与风投",
     "vcblogs": "风投洞察与文章",
     "regionalStartups": "全球创业新闻",
@@ -446,7 +500,9 @@
         "displacement": "切换流离失所流向",
         "climate": "切换气候异常",
         "outages": "切换互联网中断",
-        "tradeRoutes": "切换贸易路线"
+        "tradeRoutes": "切换贸易路线",
+        "canadaRoads": "Toggle Canada roads overlay",
+        "canadaAlerts": "Toggle Canada provincial emergency alerts overlay"
       },
       "view": {
         "dark": "切换到暗色模式",
@@ -608,7 +664,7 @@
         "URLHAUS_AUTH_KEY": "用于URLhaus和ThreatFox API。",
         "OTX_API_KEY": "网络威胁图层的可选增强数据源。",
         "ABUSEIPDB_API_KEY": "恶意IP信誉的可选增强数据源。",
-        "FINNHUB_API_KEY": "实时股票报价和市场数据。",
+        "FINNHUB_API_KEY": "延迟或预置的股票报价和市场数据。有密钥也不代表直连行情。",
         "NASA_FIRMS_API_KEY": "消防信息资源管理系统。",
         "OLLAMA_API_URL": "e.g. http://127.0.0.1:11434 (Ollama) or http://127.0.0.1:1234/v1 (LM Studio) — OpenAI-compatible endpoint.",
         "OLLAMA_MODEL": "e.g. llama3.1:8b — model tag to use for summarization."
@@ -852,7 +908,12 @@
       "loadingHistory": "正在加载过境历史…",
       "historyUnavailable": "过境历史不可用",
       "transitDataUnavailable": "过境数据不可用（上游数据不完整）",
-      "infoTooltip": "<strong>供应链监控</strong> 全球物流与资源追踪：<ul><li><strong>战略要道</strong>：海上过境状态、中断评分和船舶数量</li><li><strong>航运</strong>：波罗的海干散货指数和运费趋势</li><li><strong>矿物</strong>：关键矿物浓度风险(HHI)和主要生产国</li></ul>点击要道卡片可展开过境历史图表。"
+      "infoTooltip": "<strong>供应链监控</strong> 全球物流与资源追踪：<ul><li><strong>战略要道</strong>：海上过境状态、中断评分和船舶数量</li><li><strong>航运</strong>：波罗的海干散货指数和运费趋势</li><li><strong>矿物</strong>：关键矿物浓度风险(HHI)和主要生产国</li></ul>点击要道卡片可展开过境历史图表。",
+      "mineStage": "Mine",
+      "refineryStage": "Refine",
+      "stageUnavailable": "No published figures for this stage",
+      "withheldNote": "W withheld",
+      "productionCaption": "Country shares of actual production. The map deposits layer shows where resources sit; this table shows who mines or refines them."
     },
     "tradePolicy": {
       "tariffs": "关税",
@@ -896,6 +957,7 @@
       "noComtradeData": "无战略流动数据",
       "comtradeUnavailable": "联合国贸易数据库数据暂时不可用",
       "sourceComtrade": "联合国贸易数据库",
+      "comtradeNationalScope": "联合国 Comtrade 的记录是报告国的国家级官方统计，不是某镇、走廊、工厂、港口或船货的出口。",
       "anomalyBadge": "异常",
       "colReporter": "国家",
       "colCommodity": "商品",
@@ -1132,7 +1194,7 @@
         "ucdpEvents": "UCDP事件",
         "displacementFlows": "流离失所流向",
         "climateAnomalies": "气候异常",
-        "weatherAlerts": "美国天气预警（NWS）",
+        "weatherAlerts": "恶劣天气预警（NWS、ECCC、WMO SWIC）",
         "strategicWaterways": "战略水道",
         "economicCenters": "经济中心",
         "criticalMinerals": "关键矿产",
@@ -1152,7 +1214,9 @@
         "speciesRecovery": "物种恢复",
         "renewableInstallations": "清洁能源",
         "radiationSpike": "辐射峰值",
-        "radiationElevated": "辐射升高"
+        "radiationElevated": "辐射升高",
+        "canadaRoads": "Canada Roads",
+        "canadaAlerts": "Canada Alerts (AB + BC + SK)"
       },
       "tooltip": {
         "earthquake": "地震",
@@ -1213,7 +1277,7 @@
           "infraDatacenters": "AI算力集群 >=10,000 GPU",
           "infraOutages": "互联网中断和服务故障",
           "naturalEventsTech": "地震、风暴、火灾（可能影响数据中心）",
-          "weatherAlerts": "美国恶劣天气预警（NWS）",
+          "weatherAlerts": "各国气象部门发布的官方恶劣天气预警（NWS、ECCC、WMO SWIC）",
           "economicCenters": "证券交易所和央行",
           "countriesOverlay": "国家名称叠加层",
           "financeExchanges": "按市场层级划分的全球主要交易所",
@@ -1225,7 +1289,7 @@
           "financeOutages": "可能影响市场运营的互联网中断",
           "financeCyberThreats": "金融基础设施周边的安全事件",
           "macroWaterways": "大宗商品航运的战略咽喉要道",
-          "weatherAlertsMarket": "与市场相关的美国恶劣天气事件（NWS）",
+          "weatherAlertsMarket": "与市场相关的官方恶劣天气预警（NWS、ECCC、WMO SWIC）",
           "naturalEventsMacro": "地震、火灾、洪水等自然灾害",
           "timeRecent": "按近几小时筛选时间数据",
           "timeExtended": "显示过去一周、一个月或所有时间的数据",
@@ -1258,7 +1322,9 @@
           "tradeRoutes": "连接港口并经过战略咽喉要道的全球主要航运通道",
           "dayNight": "实时太阳终结线显示昼夜区域",
           "geoBoundaries": "非军事区、停火线和争议边界",
-          "ciiChoropleth": "国家不稳定指数热力图 — 按CII评分为国家着色（绿色=稳定，红色=危急）"
+          "ciiChoropleth": "国家不稳定指数热力图 — 按CII评分为国家着色（绿色=稳定，红色=危急）",
+          "canadaRoads": "Official road incidents, alerts, conditions, closures, construction, and hazards across supported Canadian jurisdictions",
+          "canadaAlerts": "Provincial public-safety alerts from Alberta Emergency Alert, B.C. Evacuation Orders and Alerts, and SaskAlert"
         },
         "notes": {
           "timeAffects": "影响范围：地震、天气、抗议、中断"
@@ -1336,7 +1402,6 @@
       "clusters": "聚类",
       "alertsLabel": "警报",
       "alert": "警报",
-      "sources_one": "{{count}} 个来源",
       "sources_other": "{{count}} 个来源",
       "briefTech": "技术简报",
       "briefCommodity": "商品简报",
@@ -1634,7 +1699,9 @@
     "breakingNews": {
       "critical": "紧急",
       "high": "重要",
-      "dismiss": "忽略"
+      "dismiss": "忽略",
+      "alertsRegion": "Breaking news alerts",
+      "viewPanel": "View related panel"
     },
     "intelligenceFindings": {
       "breakingAlerts": "突发警报",
@@ -1694,6 +1761,21 @@
       "viewSource": "查看来源",
       "filterGeopolitics": "地缘政治",
       "filterCyber": "网络"
+    },
+    "xIntel": {
+      "infoTooltip": "Curated public news-account posts from X. Official API only.",
+      "loading": "Connecting to X news-account relay...",
+      "empty": "No posts available",
+      "disabled": "X news-account relay not active",
+      "filterAll": "All",
+      "filterBreaking": "Breaking",
+      "filterConflict": "Conflict",
+      "filterOsint": "OSINT",
+      "filterMiddleeast": "Middle East",
+      "live": "LIVE",
+      "viewSource": "View Source",
+      "filterGeopolitics": "Geopolitics",
+      "filterCyber": "Cyber"
     },
     "investments": {
       "infoTooltip": "沙特阿拉伯和阿联酋在全球关键基础设施领域的对外直接投资数据库。点击某行可在地图上飞到该投资所在位置。",
@@ -1871,13 +1953,23 @@
       "topTargets": "主要目标国家"
     },
     "commodities": {
-      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress."
+      "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress.",
+      "commodities": "Commodities",
+      "physicalPremiums": "Physical premium",
+      "physical": "Physical",
+      "paper": "Paper",
+      "premium": "Premium",
+      "asOf": "As of {{date}}",
+      "metals": {
+        "gold": "Gold",
+        "silver": "Silver"
+      }
     },
     "crypto": {
       "infoTooltip": "<strong>Crypto</strong> Live prices, 24h changes, and volume for major cryptocurrencies. Data sourced from CoinGecko."
     },
     "gulfEconomies": {
-      "infoTooltip": "<strong>Gulf Economies</strong> Real-time Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
+      "infoTooltip": "<strong>Gulf Economies</strong> Seeded Gulf stock indices, currency rates, and oil prices for GCC economies (Saudi Arabia, UAE, Kuwait, Qatar, Bahrain, Oman)."
     },
     "groceryBasket": {
       "infoTooltip": "<strong>Grocery Index</strong> Global grocery basket price comparison across 24 countries — tracks real-world consumer goods inflation beyond headline CPI."
@@ -1945,17 +2037,12 @@
       },
       "time": {
         "justNow": "刚才",
-        "hoursAgo_one": "{{count}}小时前",
         "hoursAgo_other": "{{count}}小时前",
-        "daysAgo_one": "{{count}}天前",
         "daysAgo_other": "{{count}}天前"
       },
       "filters": {
-        "alert_one": "{{count}} 条警报",
         "alert_other": "{{count}} 条警报",
-        "warning_one": "{{count}} 条警告",
         "warning_other": "{{count}} 条警告",
-        "watch_one": "{{count}} 条监测",
         "watch_other": "{{count}} 条监测"
       },
       "errors": {
@@ -2118,7 +2205,6 @@
       "rationale": "理由：",
       "driver": "驱动因素：",
       "appliesToNext": "适用于下一次AI重新生成",
-      "signals_one": "{{count}}个信号",
       "signals_other": "{{count}}个信号",
       "disclaimer": "AI生成的交易信号仅供参考。非投资建议。请自行研究。",
       "unavailable": "AI市场影响在每次预测运行后生成。请稍后查看。"
@@ -2139,7 +2225,7 @@
       "infoTooltip": "<strong>灾难级联</strong> 检测汇聚的自然灾害和基础设施信号：<ul><li>关联地震、野火、洪灾和极端天气</li><li>追踪对基础设施和供应链的级联影响</li><li>突出具有复合灾难风险的地区</li></ul>点击卡片可在地图上放大到受影响区域。"
     },
     "markets": {
-      "infoTooltip": "<strong>市场</strong> 实时股票指数、股票和加密货币价格。使用\"观察列表\"按钮自定义您的观察列表。火花线显示最近价格趋势。",
+      "infoTooltip": "<strong>市场</strong> 延迟或预置的股票指数、股票和加密货币价格。使用\"观察列表\"按钮自定义您的观察列表。火花线显示最近价格趋势。",
       "chart": {
         "title": "{{symbol}} 价格图表",
         "close": "关闭图表"
@@ -2320,13 +2406,14 @@
     },
     "sanctionsPressure": {
       "title": "制裁与指定",
-      "infoTooltip": "来自 SDN 和综合名单的 OFAC 制裁指定。显示哪些国家面临最高指定压力、驱动因素以及自上次更新以来新增的内容。",
+      "infoTooltip": "OFAC 的 SDN 与综合名单，以及加拿大全球事务部 SEMA/JVCFOA 指定。 显示哪些国家面临最高指定压力、驱动因素以及自上次更新以来新增的内容。",
       "loading": "正在加载制裁数据...",
       "unavailable": "制裁数据不可用。",
       "summary": {
         "new": "新增",
         "vessels": "船舶",
-        "aircraft": "飞机"
+        "aircraft": "飞机",
+        "sema": "SEMA"
       },
       "sections": {
         "countries": "受制裁国家",
@@ -2341,13 +2428,13 @@
       "footer": {
         "updated": "更新于 {{time}}",
         "dataset": "数据集 {{date}}",
-        "source": "来源：OFAC"
+        "source": "来源：OFAC · GAC SEMA"
       },
       "pills": {
         "newCount": "+{{count}} 新增",
-        "new": "新增"
+        "new": "新增",
+        "sema": "sema-ca"
       },
-      "designations_one": "{{count}} 项指定",
       "designations_other": "{{count}} 项指定",
       "fallbacks": {
         "unattributed": "未归属",
@@ -2385,9 +2472,7 @@
         "updated": "更新于 {{time}}"
       },
       "observed": {
-        "hoursAgo_one": "{{count}}h 前",
         "hoursAgo_other": "{{count}}h 前",
-        "daysAgo_one": "{{count}}d 前",
         "daysAgo_other": "{{count}}d 前"
       },
       "confidence": {
@@ -2417,7 +2502,6 @@
     "correlation": {
       "loading": "等待数据...",
       "empty": "未检测到活跃收敛",
-      "signals_one": "{{count}} 个信号",
       "signals_other": "{{count}} 个信号",
       "analyzing": "分析中...",
       "viewOnMap": "在地图上查看"
@@ -2444,16 +2528,11 @@
         "industrial": "工业",
         "strategic": "战略性"
       },
-      "observations_one": "{{count}} 次观测",
       "observations_other": "{{count}} 次观测",
-      "sources_one": "{{count}} 个来源",
       "sources_other": "{{count}} 个来源",
       "age": {
-        "minutesAgo_one": "{{count}} 分钟前",
         "minutesAgo_other": "{{count}} 分钟前",
-        "hoursAgo_one": "{{count}} 小时前",
         "hoursAgo_other": "{{count}} 小时前",
-        "daysAgo_one": "{{count}} 天前",
         "daysAgo_other": "{{count}} 天前"
       }
     },
@@ -2791,6 +2870,7 @@
     "moreEvents": "更多事件",
     "monitoring": "监控中",
     "viewUSGS": "在USGS上查看",
+    "viewNRCan": "在Earthquakes Canada上查看",
     "expired": "已过期",
     "timeAgo": {
       "s": "{{count}}秒前",
@@ -2910,7 +2990,11 @@
       "heading": "航向",
       "hexCode": "HEX代码",
       "squawk": "应答机代码",
-      "attribution": "来源：adsb.lol (ODbL) · OpenSky Network"
+      "attribution": "来源：adsb.lol (ODbL) · OpenSky Network",
+      "climbRate": "爬升率",
+      "manufacturer": "制造商",
+      "owner": "所有者",
+      "builtYear": "制造年份"
     },
     "militaryVessel": {
       "aisDark": "AIS信号消失",
@@ -2955,7 +3039,8 @@
       "moreVessels": "还有{{count}}艘舰艇",
       "vesselsCount": "{{count}}艘舰艇",
       "vessels": "舰艇",
-      "trackedVessels": "跟踪舰艇"
+      "trackedVessels": "跟踪舰艇",
+      "showLess": "显示更少"
     },
     "naturalEvent": {
       "closed": "已结束",
@@ -3221,7 +3306,8 @@
     "retry": "Retry",
     "refresh": "Refresh",
     "all": "全部",
-    "cancel": "取消"
+    "cancel": "取消",
+    "dismiss": "Dismiss"
   },
   "preferences": {
     "display": "显示",
@@ -3243,7 +3329,9 @@
     "fontFamily": "字体",
     "fontFamilyDesc": "等宽字体用于技术外观，系统默认字体便于阅读。",
     "fontMono": "等宽字体",
-    "fontSystem": "系统默认"
+    "fontSystem": "系统默认",
+    "panelFontScale": "文本大小",
+    "followGlobalFontScale": "使用全局设置"
   },
   "contextMenu": {
     "openCountryBrief": "打开国家简报",
@@ -3334,7 +3422,9 @@
       "orefSirens1": "实时以色列导弹和火箭警报",
       "orefSirens2": "警报区域地图及威胁分类",
       "telegramIntel1": "精选 Telegram 开源情报频道",
-      "telegramIntel2": "近实时冲突与地缘政治更新"
+      "telegramIntel2": "近实时冲突与地缘政治更新",
+      "xIntel1": "Curated public news accounts on X",
+      "xIntel2": "API-fresh posts with official permalinks"
     }
   },
   "auth": {

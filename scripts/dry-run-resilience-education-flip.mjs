@@ -23,6 +23,8 @@
 // source edit would have to be reverted before the real measurement, which is
 // exactly the kind of step that gets forgotten between two runs.
 
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,13 +41,18 @@ import {
   penalizedPillarScore,
 } from '../server/worldmonitor/resilience/v1/_shared.ts';
 import { buildPillarList } from '../server/worldmonitor/resilience/v1/_pillar-membership.ts';
-import { MATCHED_PAIRS } from '../tests/helpers/resilience-matched-pairs.mts';
+import {
+  MATCHED_PAIRS,
+  evaluateWholeIndexMatchedPairs,
+} from '../tests/helpers/resilience-matched-pairs.mts';
 import { RESILIENCE_COHORTS } from '../tests/helpers/resilience-cohorts.mts';
 
 loadEnvFile(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
+const HARNESS_PATH = 'scripts/dry-run-resilience-education-flip.mjs';
+const EDUCATION_REDIS_KEY = 'resilience:education-attainment:v1';
 
 // In-universe coverage of `resilience:education-attainment:v1`, measured
 // against scripts/shared/sovereign-status.json on 2026-08-11 (recordCount 189
@@ -67,6 +74,172 @@ const universe = Object.values(
 ).map((entry) => entry.iso2);
 
 const shippedEducationWeight = RESILIENCE_DIMENSION_WEIGHTS.education;
+
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalize(nested)]),
+    );
+  }
+  return value;
+};
+
+const canonicalJson = (value) => JSON.stringify(canonicalize(value));
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const jsonEqual = (left, right) => canonicalJson(left) === canonicalJson(right);
+const ACCEPTANCE_ARTIFACT_DIRECTORY = 'docs/snapshots';
+const ACCEPTANCE_RECAPTURE_COMMAND = 'DRY_RUN_OUTPUT=docs/snapshots/resilience-education-acceptance-$(date -u +%F).json node --import tsx/esm scripts/dry-run-resilience-education-flip.mjs';
+
+function formatAcceptanceArtifactPath(filename) {
+  if (typeof filename !== 'string' || filename.length === 0) {
+    return `${ACCEPTANCE_ARTIFACT_DIRECTORY}/resilience-education-acceptance-{date}.json`;
+  }
+  return filename.includes('/') ? filename : `${ACCEPTANCE_ARTIFACT_DIRECTORY}/${filename}`;
+}
+
+function acceptanceArtifactMismatchError(filename, detail) {
+  return new Error(
+    `${detail} for ${formatAcceptanceArtifactPath(filename)}; `
+    + `re-capture against production seeds with: ${ACCEPTANCE_RECAPTURE_COMMAND}`,
+  );
+}
+
+/**
+ * Project a serialized gate onto the acceptance conclusion it proves.
+ *
+ * Gate names, detail strings, thresholds, and rationales are useful capture
+ * evidence, but they are not themselves acceptance outcomes.
+ * Keep only the status and measured values here so a harmless calibration edit
+ * does not invalidate an otherwise identical measurement. Acceptance-relevant
+ * attribution is retained. A changed status or measured value still fails
+ * closed.
+ */
+export function projectAcceptanceGateOutcome(gate) {
+  const base = { id: gate?.id, status: gate?.status };
+  const evidence = gate?.evidence ?? {};
+
+  switch (gate?.id) {
+    case 'gate-1-spearman':
+      return {
+        ...base,
+        measured: {
+          spearman: evidence.spearman,
+          countries: evidence.countries,
+        },
+      };
+    case 'gate-2-country-drift': {
+      const topMovers = Array.isArray(evidence.topMovers)
+        ? evidence.topMovers.map((mover) => ({
+          countryCode: mover?.countryCode,
+          delta: mover?.delta,
+        }))
+        : null;
+      const topMover = topMovers?.[0] ?? null;
+      return {
+        ...base,
+        measured: {
+          maxAbsDelta: Number.isFinite(topMover?.delta) ? Math.abs(topMover.delta) : null,
+          topMovers,
+        },
+      };
+    }
+    case 'gate-6-cohort-median':
+      return {
+        ...base,
+        measured: Array.isArray(evidence.cohortShifts)
+          ? evidence.cohortShifts
+            .map((cohort) => ({
+              cohort: cohort?.cohort,
+              members: cohort?.members,
+              medianShift: cohort?.medianShift,
+            }))
+            .sort((left, right) => String(left.cohort).localeCompare(String(right.cohort)))
+          : null,
+      };
+    case 'gate-7-matched-pair':
+      return {
+        ...base,
+        measured: Array.isArray(evidence.pairs)
+          ? evidence.pairs
+            .map((pair) => ({
+              pairId: pair?.pairId,
+              status: pair?.status,
+              baselineStatus: pair?.baselineStatus,
+              regression: pair?.regression,
+              preExisting: pair?.preExisting,
+              gap: pair?.gap,
+              baselineGap: pair?.baselineGap,
+              gapDelta: pair?.gapDelta,
+            }))
+            .sort((left, right) => String(left.pairId).localeCompare(String(right.pairId)))
+          : null,
+        regressions: Array.isArray(evidence.regressions)
+          ? [...evidence.regressions].sort((left, right) => String(left).localeCompare(String(right)))
+          : null,
+        preExisting: Array.isArray(evidence.preExisting)
+          ? [...evidence.preExisting].sort((left, right) => String(left).localeCompare(String(right)))
+          : null,
+      };
+    case 'gate-9-effective-influence-baseline':
+      return {
+        ...base,
+        measured: {
+          coreImplemented: evidence.coreImplemented,
+          coreTotal: evidence.coreTotal,
+          educationPairedSampleSize: evidence.educationPairedSampleSize,
+          educationCountryCodes: Array.isArray(evidence.educationCountryCodes)
+            ? [...evidence.educationCountryCodes].sort()
+            : null,
+        },
+      };
+    default:
+      throw new Error(`unknown acceptance gate id: ${String(gate?.id)}`);
+  }
+}
+
+export function projectAcceptanceGateOutcomes(gates) {
+  return Array.isArray(gates)
+    ? gates
+      .map(projectAcceptanceGateOutcome)
+      .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    : null;
+}
+
+function getCaptureSourceState() {
+  const trackedChanges = execFileSync(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no'],
+    { cwd: REPO_ROOT, encoding: 'utf8' },
+  ).trim();
+  if (trackedChanges) {
+    throw new Error('DRY_RUN_OUTPUT requires a clean tracked worktree so the harness commit is exact');
+  }
+  return {
+    harness: HARNESS_PATH,
+    harnessCommitSha: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    }).trim(),
+    harnessSha256: sha256(readFileSync(fileURLToPath(import.meta.url))),
+  };
+}
+
+function buildRedisCaptureProvenance(cache) {
+  const keyDigests = Object.fromEntries(
+    [...cache.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => [key, sha256(canonicalJson(value))]),
+  );
+  return {
+    source: 'production-upstash-redis-rest',
+    resolvedKeyCount: Object.keys(keyDigests).length,
+    keyDigests,
+    snapshotSha256: sha256(canonicalJson(keyDigests)),
+  };
+}
 
 export function parseEducationWeightOverride(raw, shippedWeight = shippedEducationWeight) {
   if (raw == null || raw === '') return null;
@@ -247,6 +420,11 @@ const round2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
 // ── gates ──────────────────────────────────────────────────────────────────
 
+function matchedPairStatus(gap, minGap) {
+  if (gap == null) return 'missing';
+  return gap >= minGap ? 'pass' : (gap > 0 ? 'near-flip' : 'inverted');
+}
+
 function evaluateGates(baseline, proposed, formula) {
   const gates = [];
   const add = (id, name, status, detail, evidence = {}) => gates.push({ id, name, status, detail, evidence });
@@ -285,36 +463,33 @@ function evaluateGates(baseline, proposed, formula) {
 
   // Direction AND minGap, evaluated on the PROPOSED scores. A pair that keeps
   // its sign but collapses to a near-tie is a near-flip, and the runbook treats
-  // that as a stop just like an inversion.
-  const pairs = MATCHED_PAIRS.map((pair) => {
-    const hi = p.get(pair.higherExpected);
-    const lo = p.get(pair.lowerExpected);
-    const baseGap = b.has(pair.higherExpected) && b.has(pair.lowerExpected)
-      ? b.get(pair.higherExpected) - b.get(pair.lowerExpected)
-      : null;
-    if (hi == null || lo == null) {
-      return { pairId: pair.id, status: 'missing', gap: null, baselineGap: round2(baseGap), minGap: pair.minGap ?? 3 };
-    }
-    const gap = hi - lo;
-    const minGap = pair.minGap ?? 3;
-    const verdict = (g) => (g >= minGap ? 'pass' : (g > 0 ? 'near-flip' : 'inverted'));
-    const status = verdict(gap);
+  // that as a stop just like an inversion. The pure evaluator is shared with
+  // the deterministic fixture gate so CI and the credentialed dry run cannot
+  // drift on missing-score or threshold semantics.
+  const proposedPairEvaluations = evaluateWholeIndexMatchedPairs(p, MATCHED_PAIRS);
+  const baselinePairEvaluations = evaluateWholeIndexMatchedPairs(b, MATCHED_PAIRS);
+  const pairs = proposedPairEvaluations.map((evaluation, index) => {
+    const baselineEvaluation = baselinePairEvaluations[index];
+    const baseGap = baselineEvaluation?.gap ?? null;
+    const status = evaluation.status;
     // A pair that ALREADY failed with the flag off was not broken by this
     // change, and the runbook's weight-fallback rule cannot fix it — halving
     // education's weight only walks the gap back toward a baseline that was
     // itself under the threshold. Separating the two is the difference between
     // "this flip is unsafe" and "this pair has a pre-existing problem".
-    const baselineStatus = baseGap == null ? 'unknown' : verdict(baseGap);
+    const baselineStatus = baseGap == null ? 'unknown' : baselineEvaluation.status;
+    const regression = status !== 'pass' && baselineStatus === 'pass';
+    const preExisting = status !== 'pass' && status !== 'missing' && baselineStatus !== 'pass';
     return {
-      pairId: pair.id,
+      pairId: evaluation.pairId,
       status,
       baselineStatus,
-      regression: status !== 'pass' && baselineStatus === 'pass',
-      preExisting: status !== 'pass' && baselineStatus !== 'pass',
-      gap: round2(gap),
+      regression,
+      preExisting,
+      gap: evaluation.gap == null ? null : round2(evaluation.gap),
       baselineGap: round2(baseGap),
-      gapDelta: baseGap == null ? null : round2(gap - baseGap),
-      minGap,
+      gapDelta: evaluation.gap == null || baseGap == null ? null : round2(evaluation.gap - baseGap),
+      minGap: evaluation.minGap,
     };
   });
   const pairFailures = pairs.filter((x) => x.status !== 'pass');
@@ -331,6 +506,83 @@ function evaluateGates(baseline, proposed, formula) {
   return gates;
 }
 
+function validateSerializedMatchedPairGate(gate, filename) {
+  const evidence = gate?.evidence;
+  if (!Array.isArray(evidence?.pairs)
+    || !Array.isArray(evidence?.regressions)
+    || !Array.isArray(evidence?.preExisting)) {
+    throw acceptanceArtifactMismatchError(
+      filename,
+      'reported matched-pair evidence does not match its serialized gap, baselineGap, and minGap',
+    );
+  }
+
+  const regressions = [];
+  const preExisting = [];
+  for (const pair of evidence.pairs) {
+    const validPair = pair
+      && typeof pair === 'object'
+      && typeof pair.pairId === 'string'
+      && Number.isFinite(pair.minGap)
+      && pair.minGap >= 0
+      && (pair.gap === null || Number.isFinite(pair.gap))
+      && (pair.baselineGap === null || Number.isFinite(pair.baselineGap));
+    if (!validPair) {
+      throw acceptanceArtifactMismatchError(
+        filename,
+        'reported matched-pair evidence does not match its serialized gap, baselineGap, and minGap',
+      );
+    }
+
+    const expectedStatus = matchedPairStatus(pair.gap, pair.minGap);
+    const expectedBaselineStatus = pair.baselineGap == null
+      ? 'unknown'
+      : matchedPairStatus(pair.baselineGap, pair.minGap);
+    const expectedRegression = expectedStatus !== 'pass' && expectedBaselineStatus === 'pass';
+    const expectedPreExisting = expectedStatus !== 'pass'
+      && expectedStatus !== 'missing'
+      && expectedBaselineStatus !== 'pass';
+    if (pair.status !== expectedStatus
+      || pair.baselineStatus !== expectedBaselineStatus
+      || pair.regression !== expectedRegression
+      || pair.preExisting !== expectedPreExisting) {
+      throw acceptanceArtifactMismatchError(
+        filename,
+        'reported matched-pair status or attribution does not match its serialized gap, baselineGap, and minGap',
+      );
+    }
+    const expectedGapDelta = pair.gap == null || pair.baselineGap == null
+      ? null
+      : round2(pair.gap - pair.baselineGap);
+    if (pair.gapDelta !== expectedGapDelta) {
+      throw acceptanceArtifactMismatchError(
+        filename,
+        'reported matched-pair gapDelta does not match its serialized gap and baselineGap',
+      );
+    }
+    if (expectedRegression) regressions.push(pair.pairId);
+    if (expectedPreExisting) preExisting.push(pair.pairId);
+  }
+
+  const sortIds = (ids) => [...ids].sort((left, right) => String(left).localeCompare(String(right)));
+  if (!jsonEqual(sortIds(evidence.regressions), sortIds(regressions))
+    || !jsonEqual(sortIds(evidence.preExisting), sortIds(preExisting))) {
+    throw acceptanceArtifactMismatchError(
+      filename,
+      'reported matched-pair attribution lists do not match their serialized pair outcomes',
+    );
+  }
+}
+
+function validateReportedMatchedPairAttribution(results, filename) {
+  for (const gates of Object.values(results ?? {})) {
+    if (!Array.isArray(gates)) continue;
+    for (const gate of gates) {
+      if (gate?.id === 'gate-7-matched-pair') validateSerializedMatchedPairGate(gate, filename);
+    }
+  }
+}
+
 export function evaluateExtractionCoverageGate({
   plan,
   educationRule,
@@ -342,34 +594,39 @@ export function evaluateExtractionCoverageGate({
   const coreImplemented = plan.filter((e) => e.tier === 'core' && e.extractionStatus === 'implemented').length;
   const ratio = coreTotal > 0 ? coreImplemented / coreTotal : 0;
   const education = plan.find((e) => e.indicator === 'femaleUpperSecondaryAttainment') ?? null;
-  const educationSamples = educationRule && educationPayload
+  const educationCountryCodes = educationRule && educationPayload
     ? countryCodes.filter((countryCode) => (
       applyExtractionRule(
         educationRule,
         { bulkV1: { [educationRule.key]: educationPayload } },
         countryCode,
       ) != null
-    )).length
-    : 0;
-  const educationReady = education?.extractionStatus === 'implemented'
-    && educationSamples === EXPECTED_EDUCATION_COVERAGE;
-  const coreReady = ratio >= GATE_THRESHOLDS.CORE_EXTRACTION_COVERAGE_MIN;
+    ))
+    : [];
+  return buildExtractionCoverageGate({
+    coreImplemented,
+    coreTotal,
+    educationPairedSampleSize: educationCountryCodes.length,
+    expectedEducationSampleSize: EXPECTED_EDUCATION_COVERAGE,
+    educationCountryCodes,
+    educationRow: education
+      ? { tier: education.tier, extractionStatus: education.extractionStatus }
+      : null,
+  });
+}
 
+function buildExtractionCoverageGate(evidence) {
+  const ratio = evidence.coreTotal > 0 ? evidence.coreImplemented / evidence.coreTotal : 0;
+  const educationReady = evidence.educationRow?.extractionStatus === 'implemented'
+    && evidence.educationPairedSampleSize === EXPECTED_EDUCATION_COVERAGE;
+  const coreReady = ratio >= GATE_THRESHOLDS.CORE_EXTRACTION_COVERAGE_MIN;
   return {
     id: 'gate-9-effective-influence-baseline',
     name: 'Core extraction baseline and education sample are measurable',
     status: coreReady && educationReady ? 'pass' : 'fail',
-    detail: `${coreImplemented}/${coreTotal} Core indicators measurable (${round2(ratio * 100)}%); `
-      + `education ${educationSamples}/${EXPECTED_EDUCATION_COVERAGE}`,
-    evidence: {
-      coreImplemented,
-      coreTotal,
-      educationPairedSampleSize: educationSamples,
-      expectedEducationSampleSize: EXPECTED_EDUCATION_COVERAGE,
-      educationRow: education
-        ? { tier: education.tier, extractionStatus: education.extractionStatus }
-        : null,
-    },
+    detail: `${evidence.coreImplemented}/${evidence.coreTotal} Core indicators measurable (${round2(ratio * 100)}%); `
+      + `education ${evidence.educationPairedSampleSize}/${EXPECTED_EDUCATION_COVERAGE}`,
+    evidence,
   };
 }
 
@@ -435,6 +692,181 @@ export function evaluateMeasurementInputs({
     imputedEducation,
     baselineWithEducation,
     sourceFailures,
+    blockingSourceFailures: sourceFailures,
+  };
+}
+
+const REQUIRED_ACTIVE_GATE_IDS = new Set([
+  'gate-1-spearman',
+  'gate-2-country-drift',
+  'gate-6-cohort-median',
+  'gate-7-matched-pair',
+  'gate-9-effective-influence-baseline',
+]);
+
+export function summarizeAcceptanceGates(results) {
+  const activeGates = results.pc;
+  const activeGateIds = Array.isArray(activeGates) ? activeGates.map((gate) => gate?.id) : [];
+  const validActiveGates = activeGateIds.length === REQUIRED_ACTIVE_GATE_IDS.size
+    && new Set(activeGateIds).size === REQUIRED_ACTIVE_GATE_IDS.size
+    && activeGateIds.every((id) => REQUIRED_ACTIVE_GATE_IDS.has(id))
+    && activeGates.every((gate) => gate?.status === 'pass' || gate?.status === 'fail');
+  if (!validActiveGates) {
+    throw new Error('active pc acceptance gates are missing, duplicated, or malformed');
+  }
+  const gatingFailures = activeGates.filter((gate) => gate.status !== 'pass');
+  const nonGatingFailures = Object.entries(results)
+    .filter(([formula]) => formula !== 'pc')
+    .flatMap(([, gates]) => gates.filter((gate) => gate.status !== 'pass'));
+  return {
+    verdict: gatingFailures.length === 0 ? 'PASS' : 'FAIL',
+    gatingFailures,
+    nonGatingFailures,
+  };
+}
+
+function deriveRecordedExtractionCoverageGate(evidence) {
+  const countryCodes = evidence?.educationCountryCodes;
+  const validCountryCodes = Array.isArray(countryCodes)
+    && countryCodes.length === new Set(countryCodes).size
+    && countryCodes.every((countryCode) => universe.includes(countryCode));
+  const validCounts = Number.isInteger(evidence?.coreImplemented)
+    && Number.isInteger(evidence?.coreTotal)
+    && evidence.coreImplemented >= 0
+    && evidence.coreTotal > 0
+    && evidence.coreImplemented <= evidence.coreTotal
+    && Number.isInteger(evidence?.educationPairedSampleSize)
+    && Number.isInteger(evidence?.expectedEducationSampleSize);
+  if (!validCountryCodes || !validCounts) {
+    throw new Error('recorded gate 9 inputs are malformed');
+  }
+
+  if (evidence.expectedEducationSampleSize !== EXPECTED_EDUCATION_COVERAGE
+    || evidence.educationPairedSampleSize !== countryCodes.length) {
+    throw new Error('recorded gate 9 inputs are internally inconsistent');
+  }
+  return buildExtractionCoverageGate(evidence);
+}
+
+function readHarnessAtCommit(commitSha) {
+  return execFileSync('git', ['show', `${commitSha}:${HARNESS_PATH}`], {
+    cwd: REPO_ROOT,
+  });
+}
+
+function validateCaptureProvenance(artifact, filename) {
+  const capture = artifact?.capture;
+  const redis = capture?.redis;
+  const keyDigests = redis?.keyDigests;
+  const validIso = (value) => typeof value === 'string'
+    && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString() === value;
+  const validDigests = keyDigests && typeof keyDigests === 'object' && !Array.isArray(keyDigests)
+    && Object.values(keyDigests).every((digest) => /^[a-f0-9]{64}$/.test(digest));
+  const valid = artifact?.schemaVersion === 2
+    && capture?.source === 'production-seed-dry-run'
+    && capture?.activeFormula === 'pc'
+    && capture?.harness === HARNESS_PATH
+    && /^[a-f0-9]{40}$/.test(capture?.harnessCommitSha ?? '')
+    && /^[a-f0-9]{64}$/.test(capture?.harnessSha256 ?? '')
+    && capture.harnessSha256 === sha256(readHarnessAtCommit(capture.harnessCommitSha))
+    && validIso(capture?.startedAt)
+    && validIso(capture?.completedAt)
+    && validIso(artifact?.measuredAt)
+    && capture.startedAt <= capture.completedAt
+    && capture.completedAt === artifact.measuredAt
+    && redis?.source === 'production-upstash-redis-rest'
+    && Number.isInteger(redis?.resolvedKeyCount)
+    && redis.resolvedKeyCount > 0
+    && validDigests
+    && redis.resolvedKeyCount === Object.keys(keyDigests).length
+    && /^[a-f0-9]{64}$/.test(redis?.snapshotSha256 ?? '')
+    && redis.snapshotSha256 === sha256(canonicalJson(keyDigests))
+    && /^[a-f0-9]{64}$/.test(keyDigests?.[EDUCATION_REDIS_KEY] ?? '');
+  if (!valid) throw new Error('capture provenance is malformed or internally inconsistent');
+
+  const match = filename?.match(/^resilience-education-acceptance-(\d{4}-\d{2}-\d{2})\.json$/);
+  if (match && (
+    !artifact.measuredAt.startsWith(match[1])
+    || !capture.startedAt.startsWith(match[1])
+    || !capture.completedAt.startsWith(match[1])
+  )) {
+    throw new Error('capture timestamps do not match the artifact filename date');
+  }
+}
+
+export function validateEducationAcceptanceArtifact(artifact, { filename } = {}) {
+  validateCaptureProvenance(artifact, filename);
+  if (artifact.educationWeight !== shippedEducationWeight
+    || artifact.shippedEducationWeight !== shippedEducationWeight) {
+    throw new Error('acceptance artifact must measure the shipped education weight');
+  }
+
+  const scoreEntries = artifact?.scores && typeof artifact.scores === 'object' && !Array.isArray(artifact.scores)
+    ? Object.entries(artifact.scores)
+    : [];
+  const scoreKeys = scoreEntries.map(([countryCode]) => countryCode);
+  if (scoreKeys.length !== universe.length
+    || new Set(scoreKeys).size !== universe.length
+    || universe.some((countryCode) => !artifact.scores[countryCode])) {
+    throw new Error('artifact scores do not cover the exact sovereign universe');
+  }
+  for (const [countryCode, row] of scoreEntries) {
+    if (!row?.baseline || !row?.proposed
+      || !['pc', 'd6'].every((formula) => Number.isFinite(row.baseline[formula]) && Number.isFinite(row.proposed[formula]))) {
+      throw new Error(`artifact score row ${countryCode} is malformed`);
+    }
+  }
+
+  const baseline = new Map(scoreEntries.map(([countryCode, row]) => [countryCode, row.baseline]));
+  const proposed = new Map(scoreEntries.map(([countryCode, row]) => [countryCode, row.proposed]));
+  const measurement = evaluateMeasurementInputs({ baseline, proposed });
+  if (!measurement.valid) throw new Error('artifact measurement inputs fail closed validation');
+  if (artifact.universeSize !== universe.length
+    || artifact.educationCoverageCountries !== measurement.observedEducation.length
+    || !jsonEqual(artifact.sourceFailures, Object.fromEntries(measurement.sourceFailures))
+    || !jsonEqual(artifact.blockingSourceFailures, Object.fromEntries(measurement.blockingSourceFailures))) {
+    throw new Error('artifact measurement summary does not match the captured scores');
+  }
+
+  const reportedResults = artifact.acceptanceGates?.gates;
+  const reportedGate9 = Array.isArray(reportedResults?.pc)
+    ? reportedResults.pc.find((gate) => gate?.id === 'gate-9-effective-influence-baseline')
+    : null;
+  const gate9CountryCodes = reportedGate9?.evidence?.educationCountryCodes;
+  if (!Array.isArray(gate9CountryCodes)
+    || !jsonEqual([...gate9CountryCodes].sort(), [...measurement.observedEducation].sort())) {
+    throw new Error('gate 9 education cohort does not match observed score coverage');
+  }
+  const recomputedResults = {
+    pc: [...evaluateGates(baseline, proposed, 'pc'), deriveRecordedExtractionCoverageGate(reportedGate9?.evidence)],
+    d6: evaluateGates(baseline, proposed, 'd6'),
+  };
+  if (!jsonEqual(
+    Object.fromEntries(Object.entries(reportedResults ?? {}).map(([formula, gates]) => [formula, projectAcceptanceGateOutcomes(gates)])),
+    Object.fromEntries(Object.entries(recomputedResults).map(([formula, gates]) => [formula, projectAcceptanceGateOutcomes(gates)])),
+  )) {
+    throw acceptanceArtifactMismatchError(filename, 'reported gate outcomes do not match recomputed outcomes');
+  }
+
+  validateReportedMatchedPairAttribution(reportedResults, filename);
+  const summary = summarizeAcceptanceGates(recomputedResults);
+  if (artifact.acceptanceGates.gatingFormula !== 'pc'
+    || artifact.acceptanceGates.verdict !== summary.verdict) {
+    throw acceptanceArtifactMismatchError(filename, 'artifact verdict does not match recomputed gates');
+  }
+  if (!jsonEqual(
+    projectAcceptanceGateOutcomes(artifact.acceptanceGates.nonGatingFailures),
+    projectAcceptanceGateOutcomes(summary.nonGatingFailures),
+  )) {
+    throw acceptanceArtifactMismatchError(filename, 'artifact non-gating failures do not match recomputed outcomes');
+  }
+
+  return {
+    verdict: summary.verdict,
+    activeFormula: 'pc',
+    universeSize: universe.length,
+    educationCoverageCountries: measurement.observedEducation.length,
   };
 }
 
@@ -452,6 +884,8 @@ async function main() {
     console.error('FATAL: Upstash Redis credentials missing — this measures against production seeds');
     process.exit(2);
   }
+  const captureStartedAt = new Date().toISOString();
+  const captureSource = process.env.DRY_RUN_OUTPUT ? getCaptureSourceState() : null;
 
   let weightOverride;
   try {
@@ -501,6 +935,7 @@ async function main() {
     imputedEducation,
     baselineWithEducation,
     sourceFailures,
+    blockingSourceFailures,
   } = measurementInputs;
   console.log(`[dry-run] education: observed ${observedEducation.length}, imputed ${imputedEducation.length}, baseline coverage ${baselineWithEducation.length} (${readCount} unique keys read)`);
 
@@ -520,19 +955,18 @@ async function main() {
     process.exit(2);
   }
 
-  // Source failures invalidate the measurement. Delta gates can isolate a
-  // shared outage, but gate 7 reads proposed ABSOLUTE scores; an unrelated
-  // failure can therefore mask or manufacture a matched-pair verdict. Abort
-  // before printing acceptance gates so degraded input never looks actionable.
-  if (sourceFailures.size > 0) {
+  // Any real source failure invalidates the measurement because the global
+  // Spearman and drift gates consume the full scored universe. Structural
+  // source absences must be removed by the source-failure classifier instead
+  // of weakening this validity guard.
+  if (blockingSourceFailures.size > 0) {
     console.error('\nFATAL: source-failure dimensions make the acceptance measurement invalid:');
-    for (const [passAndDimension, count] of [...sourceFailures.entries()].sort((a, b) => b[1] - a[1])) {
+    for (const [passAndDimension, count] of [...blockingSourceFailures.entries()].sort((a, b) => b[1] - a[1])) {
       console.error(`  ${passAndDimension.padEnd(35)} ${count}/${universe.length} countries`);
     }
     console.error('Re-run after source health recovers. Do NOT interpret PASS or FAIL from this run.');
     process.exit(2);
   }
-
   const results = {};
   for (const formula of ['pc', 'd6']) {
     const gates = evaluateGates(baseline, proposed, formula);
@@ -570,9 +1004,11 @@ async function main() {
     console.log(`  ${cc}  ${round2(before)} -> ${round2(after)}  (${after - before > 0 ? '+' : ''}${round2(after - before)})  education dim ${proposed.get(cc)?.educationScore}`);
   }
 
-  const allGates = [...results.pc, ...results.d6];
-  const failed = allGates.filter((g) => g.status !== 'pass');
-  const verdict = failed.length === 0 ? 'PASS' : 'FAIL';
+  const {
+    verdict,
+    gatingFailures: failed,
+    nonGatingFailures,
+  } = summarizeAcceptanceGates(results);
 
   // Attribution matters more than the bare verdict here. The runbook's
   // weight-fallback rule assumes a failing gate was CAUSED by the flip; it
@@ -580,8 +1016,8 @@ async function main() {
   // because halving the weight only walks the gap back toward that baseline.
   // Reporting a bare FAIL would send an operator to a fallback that provably
   // does not apply.
-  const allRegressions = [...new Set(allGates.flatMap((g) => g.evidence?.regressions ?? []))];
-  const allPreExisting = [...new Set(allGates.flatMap((g) => g.evidence?.preExisting ?? []))];
+  const allRegressions = [...new Set(results.pc.flatMap((g) => g.evidence?.regressions ?? []))];
+  const allPreExisting = [...new Set(results.pc.flatMap((g) => g.evidence?.preExisting ?? []))];
   const nonPairFailures = failed.filter((g) => g.id !== 'gate-7-matched-pair');
 
   console.log(`\n================ VERDICT: ${verdict} ================`);
@@ -589,6 +1025,10 @@ async function main() {
     console.log('Failed gates:', [...new Set(failed.map((g) => g.id))].join(', '));
     console.log(`  caused by this flip:      ${allRegressions.length ? allRegressions.join(', ') : 'none'}`);
     console.log(`  already failing at flag-off baseline: ${allPreExisting.length ? allPreExisting.join(', ') : 'none'}`);
+  }
+  if (nonGatingFailures.length) {
+    console.log('Legacy diagnostic failures (not part of the active pc acceptance verdict):',
+      [...new Set(nonGatingFailures.map((g) => g.id))].join(', '));
   }
   const fallbackIndicated = nonPairFailures.length > 0 || allRegressions.length > 0;
   if (fallbackIndicated) {
@@ -601,18 +1041,38 @@ async function main() {
   }
 
   if (process.env.DRY_RUN_OUTPUT) {
+    const measuredAt = new Date().toISOString();
     const payload = {
-      measuredAt: new Date().toISOString(),
+      schemaVersion: 2,
+      measuredAt,
+      capture: {
+        source: 'production-seed-dry-run',
+        activeFormula: 'pc',
+        startedAt: captureStartedAt,
+        completedAt: measuredAt,
+        ...captureSource,
+        redis: buildRedisCaptureProvenance(readCache),
+      },
       educationWeight: RESILIENCE_DIMENSION_WEIGHTS.education,
       shippedEducationWeight,
       universeSize: universe.length,
       educationCoverageCountries: observedEducation.length,
-      acceptanceGates: { verdict, gates: results },
+      sourceFailures: Object.fromEntries(sourceFailures),
+      blockingSourceFailures: Object.fromEntries(blockingSourceFailures),
+      acceptanceGates: {
+        verdict,
+        gatingFormula: 'pc',
+        gates: results,
+        nonGatingFailures,
+      },
       scores: Object.fromEntries(universe.map((cc) => [cc, {
         baseline: baseline.get(cc) ?? null,
         proposed: proposed.get(cc) ?? null,
       }])),
     };
+    validateEducationAcceptanceArtifact(payload, {
+      filename: path.basename(process.env.DRY_RUN_OUTPUT),
+    });
     writeFileSync(process.env.DRY_RUN_OUTPUT, `${JSON.stringify(payload, null, 2)}\n`);
     console.log(`\nwrote ${process.env.DRY_RUN_OUTPUT}`);
   }

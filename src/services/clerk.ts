@@ -23,6 +23,8 @@
 
 import type { Clerk } from '@clerk/clerk-js';
 import { enqueueSentryCall } from '@/bootstrap/sentry-defer';
+import { EULA_PATH, PRIVACY_PATH, absoluteLegalUrl } from '../../shared/legal';
+import { WEB_APP_ORIGIN } from '@/config/web-origin';
 
 type ClerkInstance = Clerk;
 type ClerkSession = NonNullable<ClerkInstance['session']>;
@@ -60,15 +62,42 @@ function getAppearance() {
     ? document.documentElement.dataset.theme !== 'light'
     : true;
 
+  // Both naming generations are listed for every color. The @clerk/ui v1
+  // bundle (loaded at runtime via __internal_ClerkUICtor) parses ONLY the
+  // new names -- colorForeground / colorInput / colorInputForeground /
+  // colorMutedForeground -- and silently ignores the legacy v5 names, so
+  // without the new names text falls back to light-dark() defaults that
+  // resolve near-black (e.g. invisible OTP digits on the dark card). The
+  // legacy names stay for clerk-js's own legacy components. Unknown keys
+  // are ignored by either parser, so the union is safe.
+
+  // Sign-up carries the same assent as checkout (#6976): with these set, Clerk
+  // renders Terms/Privacy links in the auth card footer, so a user creating an
+  // account is shown the documents rather than only bound by a browsewrap.
+  // Absolute because the desktop WebView origin has no /docs (#5911).
+  const layout = {
+    // The EULA, not the Terms: sign-up should show the document that states
+    // what the account is licensed to do (#6983). Clerk exposes one "terms"
+    // slot; the EULA links the Terms from its section 2.
+    termsPageUrl: absoluteLegalUrl(EULA_PATH, WEB_APP_ORIGIN),
+    privacyPageUrl: absoluteLegalUrl(PRIVACY_PATH, WEB_APP_ORIGIN),
+  };
+
   return isDark
     ? {
+        layout,
         variables: {
           colorBackground: '#0f0f0f',
           colorInputBackground: '#141414',
+          colorInput: '#141414',
           colorInputText: '#e8e8e8',
+          colorInputForeground: '#e8e8e8',
           colorText: '#e8e8e8',
+          colorForeground: '#e8e8e8',
           colorTextSecondary: '#aaaaaa',
+          colorMutedForeground: '#aaaaaa',
           colorPrimary: '#44ff88',
+          colorPrimaryForeground: '#000000',
           colorNeutral: '#e8e8e8',
           colorDanger: '#ff4444',
           borderRadius: '4px',
@@ -92,13 +121,19 @@ function getAppearance() {
         },
       }
     : {
+        layout,
         variables: {
           colorBackground: '#ffffff',
           colorInputBackground: '#f8f9fa',
+          colorInput: '#f8f9fa',
           colorInputText: '#1a1a1a',
+          colorInputForeground: '#1a1a1a',
           colorText: '#1a1a1a',
+          colorForeground: '#1a1a1a',
           colorTextSecondary: '#555555',
+          colorMutedForeground: '#555555',
           colorPrimary: '#16a34a',
+          colorPrimaryForeground: '#ffffff',
           colorNeutral: '#1a1a1a',
           colorDanger: '#dc2626',
           borderRadius: '4px',
@@ -603,12 +638,19 @@ function shouldReuseCachedClerkTokenWithExpiry(
 /**
  * Whether the cached token can still sign a request. Both bounds must hold.
  *
- * The TTL alone was the bug (Sentry WORLDMONITOR-XR/XQ): Clerk's `getToken()`
- * is stale-while-revalidate — within 15s of expiry it returns the CACHED token
- * immediately and refreshes in the background — so the premise this cache was
- * built on ("Clerk tokens expire at 60s", i.e. every token arrives fresh) does
- * not hold. Stamping a token that had 12s left with a flat 50s TTL left ~38s in
- * which every request it signed came back 401, healing only when the TTL lapsed.
+ * The TTL alone was the bug (Sentry WORLDMONITOR-XR/XQ, and the May–July 2026
+ * WORLDMONITOR-QK ramp): Clerk's `getToken()` is stale-while-revalidate —
+ * within 15s of expiry it returns the CACHED token immediately and refreshes
+ * in the background — so the premise this cache was built on ("Clerk tokens
+ * expire at 60s", i.e. every token arrives fresh) does not hold. Stamping a
+ * token that had 12s left with a flat 50s TTL left ~38s in which every request
+ * it signed came back 401, healing only when the TTL lapsed. Which Sentry
+ * bucket a leftover lands in depends on how dead it is by the time the edge
+ * sees it — three outcomes, not two; see Two-Verifier Seam in CONCEPTS.md.
+ * Still inside `exp` and rejected by Convex is QK; past `exp` but inside the
+ * edge's `clockTolerance` also reaches Convex, and is kept out of QK by the
+ * capture skip rather than by any edge 401; only past `exp` AND past that
+ * tolerance is refused at the edge (XR/XQ).
  *
  * The TTL is still enforced on top: it is what bounds how long a session that
  * was revoked but not yet expired keeps working.

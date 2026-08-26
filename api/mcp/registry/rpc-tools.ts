@@ -1,4 +1,5 @@
 import COUNTRY_BBOXES from '../../../shared/country-bboxes.js';
+import { isOpenSkyProvider } from '../../../shared/provider-redistribution';
 import {
   CHINA_DECISION_SIGNAL_GROUP_IDS,
   CHINA_DECISION_SIGNAL_MAX_SERIALIZED_BYTES,
@@ -11,9 +12,14 @@ import { argStr } from '../filters';
 import { buildAuthHeaders } from '../auth';
 import { assertToolFetchOk, BillingDenialError, throwIfBillingDenial } from '../billing-denial';
 import { SUPPORTED_CONSUMER_PRICES_COUNTRIES } from '../constants';
-import { assertMcpToolFetchOk, BothSourcesFailedError } from '../downstream';
+import {
+  assertMcpToolFetchOk,
+  BothSourcesFailedError,
+  buildMcpDownstreamHeaders,
+} from '../downstream';
 import { evaluateFreshness } from '../freshness';
 import { McpSourceUnavailableError } from '../source-unavailable';
+import { normalizeCountry } from '../../../server/_shared/intel-history-client';
 import {
   collectInsightSources,
   insightsSnapshotRejection,
@@ -420,6 +426,14 @@ function addStringParam(query: URLSearchParams, name: string, value: unknown): v
   if (typeof value === 'string' && value.trim()) query.set(name, value.trim());
 }
 
+// Intel-history `country` filters are normalized through the canonical
+// `normalizeCountry` (server/_shared/intel-history-client.ts): the generated
+// validator enabled by GHSA-cmj5-cfhr-w964 requires `^([A-Z]{2})?$`, and an
+// LLM sending "ua" earned a 400 round-trip (WORLDMONITOR-10R / -10Q). At the
+// POST call sites below, `|| undefined` keeps a blank/non-string filter
+// omitted — the pattern makes the field optional, and sending "" would turn
+// "search every country" into an explicit empty filter.
+
 function procurementPageSize(value: unknown): number {
   return Number.isInteger(value) && (value as number) > 0
     ? Math.min(PROCUREMENT_TOOL_MAX_PAGE_SIZE, value as number)
@@ -526,7 +540,90 @@ const INTEL_HISTORY_RECORD_SCHEMA = {
   },
 };
 
+const DEFENSE_INDUSTRIAL_METRIC_SCHEMA = {
+  type: 'object',
+  required: ['available', 'value', 'year', 'previousValue', 'previousYear', 'source'],
+  properties: {
+    available: { type: 'boolean' },
+    value: { type: 'number' },
+    year: { type: 'integer' },
+    previousValue: { type: 'number' },
+    previousYear: { type: 'integer' },
+    source: { type: 'string' },
+  },
+};
+
+const DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA = {
+  type: 'object' as const,
+  description: 'A source observation. Read available before value; an unavailable proto3 numeric field is zero.',
+  properties: {
+    available: { type: 'boolean' as const },
+    value: { type: 'number' as const },
+    year: { type: 'integer' as const, description: 'Source observation year.' },
+    source: { type: 'string' as const },
+    unit: { type: 'string' as const },
+  },
+};
+
 export const RPC_TOOLS: ToolDef[] = [
+  {
+    name: 'get_defense_industrial_base',
+    _outputBudgetBytes: 16_384,
+    description: 'Return one country\'s latest World Bank military-capacity indicators and SIPRI-derived five-year arms-supplier shares and concentration. Use this to answer who supplies a country\'s major weapons and how concentrated that dependency is. TIV is a transfer-volume indicator, not money.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country_code: { type: 'string', description: 'ISO 3166-1 alpha-2 country code, such as UA, DE, or IN.' },
+      },
+      required: ['country_code'],
+    },
+    outputSchema: {
+      type: 'object',
+      required: ['countryCode', 'available', 'expenditurePctGdp', 'expenditureUsd', 'personnel', 'armsExportsTiv', 'armsImportsTiv', 'suppliers', 'supplierHhi', 'windowStartYear', 'windowEndYear', 'supplierSource', 'fetchedAt', 'industrialFetchedAt', 'supplierFetchedAt', 'supplierRetained', 'supplierMappingCoverage'],
+      properties: {
+        countryCode: { type: 'string' },
+        available: { type: 'boolean' },
+        expenditurePctGdp: DEFENSE_INDUSTRIAL_METRIC_SCHEMA,
+        expenditureUsd: DEFENSE_INDUSTRIAL_METRIC_SCHEMA,
+        personnel: DEFENSE_INDUSTRIAL_METRIC_SCHEMA,
+        armsExportsTiv: DEFENSE_INDUSTRIAL_METRIC_SCHEMA,
+        armsImportsTiv: DEFENSE_INDUSTRIAL_METRIC_SCHEMA,
+        suppliers: { type: 'array', items: { type: 'object', required: ['supplierIso2', 'tivShare'], properties: { supplierIso2: { type: 'string', pattern: '^[A-Z]{2}$' }, tivShare: { type: 'number', minimum: 0, maximum: 1 } } } },
+        supplierHhi: { type: 'number', minimum: 0, maximum: 1, description: 'Herfindahl-Hirschman concentration from 0 to 1; higher means fewer dominant suppliers.' },
+        windowStartYear: { type: 'integer' },
+        windowEndYear: { type: 'integer' },
+        supplierSource: { type: 'string' },
+        fetchedAt: { type: 'string', description: 'Oldest source timestamp among values served.' },
+        industrialFetchedAt: { type: 'string', description: 'World Bank snapshot timestamp for the country metrics served.' },
+        supplierFetchedAt: { type: 'string', description: 'SIPRI timestamp for this importer row, including its original timestamp when retained.' },
+        supplierRetained: { type: 'boolean', description: 'True when the importer row was retained after its current SIPRI request failed.' },
+        supplierMappingCoverage: { type: 'number', minimum: 0, maximum: 1, description: 'Share of positive supplier TIV mapped to ISO2 suppliers; HHI uses the full denominator.' },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _execute: async (params, base, context, execution) => {
+      const countryCode = argStr(params.country_code).trim().toUpperCase();
+      // The MCP gate has already authenticated and metered this call. Fetch the
+      // caller-invariant country snapshot through its bounded public CDN shape
+      // so MCP traffic does not parse both global Redis snapshots per request.
+      const url = `${base}/api/military/v1/get-defense-industrial-base?country_code=${encodeURIComponent(countryCode)}&public=1`;
+      const response = await fetch(url, {
+        headers: buildMcpDownstreamHeaders(base, execution, {
+          'User-Agent': 'worldmonitor-mcp-edge/1.0',
+        }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      await assertMcpToolFetchOk(response, {
+        operation: 'get-defense-industrial-base',
+        tool: 'get_defense_industrial_base',
+        auth: context,
+        execution,
+      });
+      return response.json();
+    },
+    _coverageKeys: ['military:industrial-base:v1', 'military:arms-suppliers:v1'],
+    _apiPaths: ['GET /api/military/v1/get-defense-industrial-base'],
+  },
   {
     name: 'get_china_decision_signals',
     _outputBudgetBytes: CHINA_DECISION_SIGNAL_MAX_SERIALIZED_BYTES,
@@ -696,7 +793,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(8_000),
       });
-      assertToolFetchOk(response, 'list-global-tenders');
+      await assertToolFetchOk(response, 'list-global-tenders');
       const result = await response.json() as ProcurementRouteResponse;
       return {
         opportunities: (result.tenders || []).map(compactProcurementOpportunity),
@@ -885,8 +982,16 @@ export const RPC_TOOLS: ToolDef[] = [
       // gateway-backed path to retain entitlement and replay protection.
       const insightsUrl = `${base}/api/infrastructure/v1/get-bootstrap-data?keys=insights`;
       const insightsAuth = await buildAuthHeaders(context, 'GET', insightsUrl, null);
+      // On a self-hosted install `base` is the sidecar's own loopback origin,
+      // whose global auth gate requires the per-session LOCAL_API_TOKEN (the
+      // MCP key authenticates the client, not this internal hop). Route the
+      // headers through the loopback helper so the process attaches the token
+      // it already holds — mirroring get_defense_industrial_base (#6538).
       const insightsRes = await fetch(insightsUrl, {
-        headers: { ...insightsAuth, 'User-Agent': UA },
+        headers: buildMcpDownstreamHeaders(base, execution, {
+          ...insightsAuth,
+          'User-Agent': UA,
+        }),
         signal: AbortSignal.timeout(6_000),
       });
       await assertMcpToolFetchOk(insightsRes, {
@@ -967,7 +1072,7 @@ export const RPC_TOOLS: ToolDef[] = [
               storyPhase: {
                 type: 'string',
                 enum: ['STORY_PHASE_UNSPECIFIED', 'STORY_PHASE_BREAKING', 'STORY_PHASE_DEVELOPING', 'STORY_PHASE_SUSTAINED', 'STORY_PHASE_FADING'],
-                description: 'Lifecycle phase from the digest story tracker. STORY_PHASE_FADING is reserved and is not currently emitted by derivePhase.',
+                description: 'Lifecycle phase from the digest story tracker. STORY_PHASE_FADING is reserved and is not currently emitted by this surface: a fading story stops appearing in the digest, so the phase cannot be observed where it is derived (#7081). Do not read the absence of STORY_PHASE_FADING as evidence that a story is still active.',
               },
             },
           },
@@ -1113,11 +1218,253 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(8_000),
       });
-      assertToolFetchOk(res, 'get-country-risk');
+      await assertToolFetchOk(res, 'get-country-risk');
       return res.json();
     },
     _apiPaths: [
       "GET /api/intelligence/v1/get-country-risk",
+    ],
+  },
+  {
+    name: 'list_x_feed',
+    _outputBudgetBytes: 65536,
+    description: 'Curated public news-account posts from monitored X accounts. Returns permalink plus derived facts only — never tweet bodies. Use this to see which accounts posted recently, not to redistribute post text.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum posts to return (1-200, default 50)' },
+        topic: { type: 'string', description: 'Optional topic filter such as breaking, conflict, geopolitics, cyber' },
+        account: { type: 'string', description: 'Optional account handle without @' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: 'Whether the ais-relay X poller currently has credentials.' },
+        count: { type: 'number' },
+        error: { type: 'string' },
+        posts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              accountId: { type: 'string' },
+              accountName: { type: 'string' },
+              handle: { type: 'string' },
+              topic: { type: 'string' },
+              timestampMs: { type: 'number' },
+              permalink: { type: 'string' },
+              facts: { type: 'array', items: { type: 'string' } },
+              hasMedia: { type: 'boolean' },
+              lang: { type: 'string' },
+              contentState: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _coverageKeys: ['intelligence:x-feed:v1'],
+    _execute: async (params, base, context) => {
+      const qs = new URLSearchParams();
+      const limit = Math.max(1, Math.min(200, Number(params.limit ?? 50) || 50));
+      qs.set('limit', String(limit));
+      if (params.topic) qs.set('topic', String(params.topic));
+      if (params.account) qs.set('account', String(params.account).replace(/^@/, ''));
+      const url = `${base}/api/intelligence/v1/list-x-feed?${qs}`;
+      const auth = await buildAuthHeaders(context, 'GET', url, null);
+      const res = await fetch(url, {
+        headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      await assertToolFetchOk(res, 'list-x-feed');
+      const payload = await res.json() as Record<string, unknown>;
+      const rawPosts = Array.isArray(payload.posts) ? payload.posts : [];
+      const posts = rawPosts.map((post: unknown) => {
+        if (!post || typeof post !== 'object') return {};
+        const rest = { ...(post as Record<string, unknown>) };
+        delete rest.text;
+        return rest;
+      });
+      return {
+        enabled: Boolean(payload?.enabled),
+        count: posts.length,
+        error: typeof payload?.error === 'string' ? payload.error : '',
+        posts,
+      };
+    },
+    _apiPaths: [
+      'GET /api/intelligence/v1/list-x-feed',
+    ],
+  },
+  {
+    name: 'get_food_stocks',
+    _outputBudgetBytes: 131072,
+    description: 'USDA PSD cereal stocks-to-use by marketing year. Ask for a country (ISO-2) plus optional commodity (wheat, corn, rice, soybeans, barley, palmOil), or country_code=WORLD for the global balance. Returns ending stocks, production, use, and the stocks-to-use ratio. Marketing years are not calendar years and must not be compared across countries as if they were.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country_code: {
+          type: 'string',
+          description: 'ISO 3166-1 alpha-2 country code (e.g. "EG") or "WORLD" for the global balance sheet.',
+        },
+        commodity: {
+          type: 'string',
+          description: 'Optional commodity slug: wheat, corn, rice, soybeans, barley, palmOil. Note palmOil is camelCase; the rest are lowercase. Omit for all six.',
+        },
+      },
+      // country_code is REQUIRED: omitting it returned every country x six
+      // commodities, which routinely exceeds _outputBudgetBytes and spent a Pro
+      // quota unit to fail. Use country_code=WORLD for the global balance.
+      required: ['country_code'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        records: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              countryCode: { type: 'string', description: 'ISO-2, or "WORLD" for the global aggregate.' },
+              commodity: { type: 'string' },
+              marketingYear: { type: 'string', description: 'e.g. "2024/25". A marketing year, NOT a calendar year — never compare across countries as if it were one.' },
+              stocksToUse: {
+                type: 'number',
+                description: 'Ending stocks / total use (0.18 = 18%). Read hasStocksToUse FIRST — when it is false this 0 is a placeholder, not a measurement. USDA estimates stocks for selected countries only, so a real producer can report production and consumption with no stocks series.',
+              },
+              hasStocksToUse: {
+                type: 'boolean',
+                description: 'False when stocksToUse is a placeholder. Never report a 0% stocks-to-use without checking this.',
+              },
+              endingStocksTmt: { type: 'number', description: 'Ending stocks in 1000 MT. Read hasEndingStocks first; 0 is a placeholder when that flag is false.' },
+              hasEndingStocks: { type: 'boolean', description: 'False when endingStocksTmt is a placeholder rather than a measurement.' },
+              totalUseTmt: {
+                type: 'number',
+                description: 'Denominator of stocksToUse. For a country this is consumption + exports; for WORLD it is consumption only, because world exports are internal transfers already counted in the importer\'s consumption.',
+              },
+              productionTmt: { type: 'number' },
+              consumptionTmt: { type: 'number' },
+              importsTmt: { type: 'number' },
+              exportsTmt: { type: 'number' },
+              unit: { type: 'string', description: 'Always "1000 MT" (thousand metric tons).' },
+              source: {
+                type: 'string',
+                description: '"psd" = USDA full balance sheet (stocks are real). "faostat" = production-only gap fill; every stocks field on that row is a 0 placeholder, not a measurement.',
+              },
+            },
+          },
+        },
+        fetchedAt: { type: 'string' },
+        unavailable: { type: 'boolean' },
+        calorieWeightedStocksToUse: { type: 'number' },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _coverageKeys: ['resilience:food-stocks:v1', 'seed-meta:resilience:food-stocks'],
+    _execute: async (params, base, context) => {
+      const q = new URLSearchParams();
+      if (params.country_code) q.set('countryCode', String(params.country_code).trim().toUpperCase());
+      if (params.commodity) q.set('commodity', String(params.commodity).trim());
+      const qs = q.toString();
+      const url = `${base}/api/resilience/v1/get-food-stocks${qs ? `?${qs}` : ''}`;
+      const auth = await buildAuthHeaders(context, 'GET', url, null);
+      const res = await fetch(url, {
+        headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
+        signal: AbortSignal.timeout(8_000),
+      });
+      await assertToolFetchOk(res, 'get-food-stocks');
+      return res.json();
+    },
+    _apiPaths: [
+      'GET /api/resilience/v1/get-food-stocks',
+    ],
+  },
+  {
+    name: 'get_demographics_capability',
+    _outputBudgetBytes: 32768,
+    description: 'Country demographics capability observations from UN WPP, World Bank/UNESCO UIS, and ILOSTAT. Returns age structure, education and industrial-workforce groups independently, with observation year, source, unit and explicit availability for every metric. Requires an ISO-2 country code and a WorldMonitor subscription.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country_code: {
+          type: 'string',
+          description: 'Required ISO 3166-1 alpha-2 country code (for example "DE"). Case-insensitive.',
+        },
+      },
+      required: ['country_code'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        countryCode: { type: 'string' },
+        available: { type: 'boolean', description: 'True when at least one validated observation is available.' },
+        fetchedAt: { type: 'string', description: 'ISO-8601 snapshot generation time.' },
+        stages: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'wpp, education, or ilostat.' },
+              status: { type: 'string', description: 'fresh, retained, or unavailable.' },
+              fetchedAt: { type: 'string' },
+              recordCount: { type: 'number' },
+              newestObservationYear: { type: 'number' },
+            },
+          },
+        },
+        ageStructure: {
+          type: 'object',
+          description: 'UN WPP age and working-age population observations. Read each metric available flag before value.',
+          properties: {
+            available: { type: 'boolean' },
+            medianAgeYears: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            oldAgeDependencyRatioPercent: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            totalDependencyRatioPercent: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            workingAgePopulationPeople: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            workingAgePopulationProjected10yPeople: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+          },
+        },
+        education: {
+          type: 'object',
+          description: 'World Bank WDI and UNESCO UIS education observations. Read each metric available flag before value.',
+          properties: {
+            available: { type: 'boolean' },
+            tertiaryEnrollmentGrossPercent: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            stemGraduatesSharePercent: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            researchersPerMillion: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+          },
+        },
+        industrialWorkforce: {
+          type: 'object',
+          description: 'ILOSTAT workforce observations. The combined trained workforce is available only for a valid same-year ISCO 7+8 cohort.',
+          properties: {
+            available: { type: 'boolean' },
+            craftTradesEmploymentPeople: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            plantMachineOperatorsEmploymentPeople: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            trainedIndustrialWorkforcePeople: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+            manufacturingEmploymentSharePercent: DEMOGRAPHICS_OBSERVATION_OUTPUT_SCHEMA,
+          },
+        },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _coverageKeys: ['demographics:capability:v1'],
+    _execute: async (params, base, context) => {
+      const countryCode = String(params.country_code ?? '').trim().toUpperCase();
+      const url = `${base}/api/resilience/v1/get-demographics-capability?countryCode=${encodeURIComponent(countryCode)}`;
+      const auth = await buildAuthHeaders(context, 'GET', url, null);
+      const res = await fetch(url, {
+        headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
+        signal: AbortSignal.timeout(8_000),
+      });
+      await assertToolFetchOk(res, 'get-demographics-capability');
+      return res.json();
+    },
+    _apiPaths: [
+      'GET /api/resilience/v1/get-demographics-capability',
     ],
   },
   {
@@ -1261,7 +1608,7 @@ export const RPC_TOOLS: ToolDef[] = [
   {
     name: 'get_airspace',
     _outputBudgetBytes: 262144,
-    description: 'Live ADS-B aircraft over a country. Returns civilian flights (OpenSky) and identified military aircraft with callsigns, positions, altitudes, and headings. Answers questions like "how many planes are over the UAE right now?" or "are there military aircraft over Taiwan?"',
+    description: 'Live ADS-B aircraft over a country. Returns Wingbits-backed civilian flights and identified military aircraft from redistributable providers, with callsigns, positions, altitudes, and headings. Answers questions like "how many planes are over the UAE right now?" or "are there military aircraft over Taiwan?"',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1324,7 +1671,7 @@ export const RPC_TOOLS: ToolDef[] = [
         updated_at?: number;
       };
       type MilResp = {
-        flights?: { callsign: string; hex_code: string; aircraft_type: string; aircraft_model: string; operator: string; operator_country: string; location?: { latitude: number; longitude: number }; altitude: number; heading: number; speed: number; is_interesting: boolean; note: string }[];
+        flights?: { callsign: string; hex_code: string; aircraft_type: string; aircraft_model: string; operator: string; operator_country: string; location?: { latitude: number; longitude: number }; altitude: number; heading: number; speed: number; is_interesting: boolean; note: string; source?: string }[];
       };
 
       const civUrl = `${base}/api/aviation/v1/track-aircraft?${bboxQ}`;
@@ -1359,13 +1706,20 @@ export const RPC_TOOLS: ToolDef[] = [
         }
       }
 
-      const civOk = type === 'military' || civResult.status === 'fulfilled';
+      const civRaw = civResult.status === 'fulfilled' ? civResult.value : null;
+      const civProviderAllowed = !civRaw || !isOpenSkyProvider(civRaw.source);
+      const civOk = type === 'military' || (civResult.status === 'fulfilled' && civProviderAllowed);
       const milOk = type === 'civilian' || milResult.status === 'fulfilled';
 
       // Both sources down — total outage, don't return misleading empty data
-      if (!civOk && !milOk) throw new BothSourcesFailedError(civResult.reason, milResult.reason);
+      if (!civOk && !milOk) {
+        const civilianFailure = civResult.status === 'rejected'
+          ? civResult.reason
+          : new Error('Civilian observations are not redistributable');
+        throw new BothSourcesFailedError(civilianFailure, milResult.reason);
+      }
 
-      const civ = civResult.status === 'fulfilled' ? civResult.value : null;
+      const civ = civProviderAllowed ? civRaw : null;
       const mil = milResult.status === 'fulfilled' ? milResult.value : null;
       const warnings: string[] = [];
       if (!civOk) warnings.push('civilian ADS-B data unavailable');
@@ -1377,7 +1731,12 @@ export const RPC_TOOLS: ToolDef[] = [
         altitude_m: p.altitude_m, speed_kts: p.ground_speed_kts,
         heading_deg: p.track_deg, on_ground: p.on_ground,
       }));
-      const militaryFlights = (mil?.flights ?? []).slice(0, 100).map(f => ({
+      const redistributableMilitaryFlights = (mil?.flights ?? [])
+        .filter((flight) => !isOpenSkyProvider(flight.source));
+      if (redistributableMilitaryFlights.length !== (mil?.flights ?? []).length) {
+        warnings.push('some military flight observations unavailable');
+      }
+      const militaryFlights = redistributableMilitaryFlights.slice(0, 100).map(f => ({
         callsign: f.callsign, hex_code: f.hex_code,
         aircraft_type: f.aircraft_type, aircraft_model: f.aircraft_model,
         operator: f.operator, operator_country: f.operator_country,
@@ -1394,7 +1753,7 @@ export const RPC_TOOLS: ToolDef[] = [
         ...(type !== 'military' && { civilian_flights: civilianFlights }),
         ...(type !== 'civilian' && { military_flights: militaryFlights }),
         ...(warnings.length > 0 && { partial: true, warnings }),
-        source: civ?.source ?? 'opensky',
+        source: civ?.source ?? redistributableMilitaryFlights.find((flight) => flight.source)?.source ?? 'none',
         updated_at: civ?.updated_at ? new Date(civ.updated_at).toISOString() : new Date().toISOString(),
       };
     },
@@ -1567,7 +1926,7 @@ export const RPC_TOOLS: ToolDef[] = [
         body,
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'deduct-situation');
+      await assertToolFetchOk(res, 'deduct-situation');
       return res.json();
     },
     _apiPaths: [
@@ -1610,7 +1969,7 @@ export const RPC_TOOLS: ToolDef[] = [
         body,
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'get-forecasts');
+      await assertToolFetchOk(res, 'get-forecasts');
       return res.json();
     },
     _apiPaths: [],
@@ -1673,7 +2032,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'search-google-flights');
+      await assertToolFetchOk(res, 'search-google-flights');
       return res.json();
     },
     _apiPaths: [
@@ -1731,7 +2090,7 @@ export const RPC_TOOLS: ToolDef[] = [
         headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
         signal: AbortSignal.timeout(25_000),
       });
-      assertToolFetchOk(res, 'search-google-dates');
+      await assertToolFetchOk(res, 'search-google-dates');
       return res.json();
     },
     _apiPaths: [
@@ -1775,6 +2134,51 @@ export const RPC_TOOLS: ToolDef[] = [
     },
     _apiPaths: [],
   },
+  {
+    name: 'get_mineral_production',
+    _outputBudgetBytes: 131072,
+    description: 'Who mines and who refines a commodity, with country shares and HHI. Answers "who refines cobalt" or "what does Chile produce". USGS Mineral Commodity Summaries plus BGS fill. Complements get_commodity_geo (deposit locations).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        commodity: { type: 'string', description: 'Commodity id or label, e.g. "cobalt", "lithium", "ree"' },
+        iso2: { type: 'string', description: 'ISO 3166-1 alpha-2 producer filter, e.g. "CL"' },
+        stage: { type: 'string', enum: ['mine', 'refinery'], description: 'Mine or refinery/smelter stage. Omit for both.' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        commodities: { type: 'array' },
+        countries: { type: 'array' },
+        fetchedAt: { type: 'string' },
+        upstreamUnavailable: { type: 'boolean' },
+        dataYear: { type: 'number' },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _execute: async (params, base, context) => {
+      const qs = new URLSearchParams();
+      if (params.commodity) qs.set('commodity', String(params.commodity));
+      if (params.iso2) qs.set('iso2', String(params.iso2).toUpperCase());
+      if (params.stage) qs.set('stage', String(params.stage));
+      const url = `${base}/api/supply-chain/v1/get-mineral-production${qs.size ? `?${qs}` : ''}`;
+      const auth = await buildAuthHeaders(context, 'GET', url, null);
+      const res = await fetch(url, {
+        headers: { ...auth, 'User-Agent': 'worldmonitor-mcp-edge/1.0' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      await assertToolFetchOk(res, 'get-mineral-production');
+      return res.json();
+    },
+    _coverageKeys: [
+      'supply-chain:mineral-production:v1',
+    ],
+    _apiPaths: [
+      'GET /api/supply-chain/v1/get-mineral-production',
+    ],
+  },
   ...ANALYSIS_TOOLS,
   {
     name: 'search_intel_history',
@@ -1806,7 +2210,7 @@ export const RPC_TOOLS: ToolDef[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _execute: async (params, base, context, execution) => {
       const url = `${base}/api/intelligence/v1/search-intel-history`;
-      const body = JSON.stringify({ query: params.query, domain: params.domain, country: params.country, from: params.from, to: params.to, limit: Math.min(Number(params.limit ?? MCP_HISTORY_SEARCH_MAX_LIMIT), MCP_HISTORY_SEARCH_MAX_LIMIT) });
+      const body = JSON.stringify({ query: params.query, domain: params.domain, country: normalizeCountry(params.country) || undefined, from: params.from, to: params.to, limit: Math.min(Number(params.limit ?? MCP_HISTORY_SEARCH_MAX_LIMIT), MCP_HISTORY_SEARCH_MAX_LIMIT) });
       const auth = await buildAuthHeaders(context, 'POST', url, body);
       // Budget covers one embeddings round-trip (4 s) plus the store read (5 s).
       const response = await fetch(url, {
@@ -1856,7 +2260,7 @@ export const RPC_TOOLS: ToolDef[] = [
       // here turns an opaque downstream failure into an actionable message and
       // saves the round-trip; the handler stays the enforcing authority.
       const domain = typeof params.domain === 'string' ? params.domain.trim() : '';
-      const country = typeof params.country === 'string' ? params.country.trim() : '';
+      const country = normalizeCountry(params.country);
       if (!domain && !country) {
         throw new Error('get_intel_timeline requires at least one of domain ("conflict", "military", or "energy") or country (ISO 3166-1 alpha-2) — those are the two indexed scopes on the history store.');
       }
@@ -1915,7 +2319,7 @@ export const RPC_TOOLS: ToolDef[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     _execute: async (params, base, context, execution) => {
       const url = `${base}/api/intelligence/v1/get-similar-events`;
-      const body = JSON.stringify({ situation: params.situation, domain: params.domain, country: params.country, limit: Math.min(Number(params.limit ?? MCP_HISTORY_PRECEDENT_MAX_LIMIT), MCP_HISTORY_PRECEDENT_MAX_LIMIT) });
+      const body = JSON.stringify({ situation: params.situation, domain: params.domain, country: normalizeCountry(params.country) || undefined, limit: Math.min(Number(params.limit ?? MCP_HISTORY_PRECEDENT_MAX_LIMIT), MCP_HISTORY_PRECEDENT_MAX_LIMIT) });
       const auth = await buildAuthHeaders(context, 'POST', url, body);
       // Budget covers one embeddings round-trip (4 s) plus the store read (5 s).
       const response = await fetch(url, {

@@ -30,6 +30,7 @@ import {
   createDefaultCheckoutTransportDeps,
   postCreateCheckout,
 } from './checkout-transport';
+import { createTimeoutSignal } from './timeout-signal';
 import {
   checkoutRetryAtMs,
   checkoutRetryRemainingSeconds,
@@ -433,7 +434,12 @@ let startCheckoutEntryInFlight = false;
 
 export async function startCheckout(
   productId: string,
-  options?: { referralCode?: string; discountCode?: string; bypassPendingGuard?: boolean },
+  options?: {
+    referralCode?: string;
+    discountCode?: string;
+    attributionSource?: string;
+    bypassPendingGuard?: boolean;
+  },
 ): Promise<boolean> {
   if (checkoutInFlight) return false;
   if (startCheckoutEntryInFlight) return false;
@@ -447,7 +453,12 @@ export async function startCheckout(
 
 async function startCheckoutInner(
   productId: string,
-  options?: { referralCode?: string; discountCode?: string; bypassPendingGuard?: boolean },
+  options?: {
+    referralCode?: string;
+    discountCode?: string;
+    attributionSource?: string;
+    bypassPendingGuard?: boolean;
+  },
 ): Promise<boolean> {
   let c: LoadedClerk;
   try {
@@ -503,17 +514,22 @@ export async function tryResumeCheckoutFromUrl(): Promise<boolean> {
     return false;
   }
   if (!c.user) return false;
-  const { productId, referralCode, discountCode } = intent;
+  const { productId, referralCode, discountCode, attributionSource } = intent;
   // Funnel (#4931): post-sign-in auto-resume — the pre-auth click already
   // fired checkout-start{authed:false}; this marks the resumed attempt.
   // productId is URL-derived here — bucketed for analytics (round-4 F2).
   trackFunnelEvent('checkout-start', { productId: bucketProductIdForAnalytics(productId), surface: 'pro-resume', authed: true });
-  return doCheckout(productId, { referralCode, discountCode });
+  return doCheckout(productId, { referralCode, discountCode, attributionSource });
 }
 
 async function doCheckout(
   productId: string,
-  options: { referralCode?: string; discountCode?: string; bypassPendingGuard?: boolean },
+  options: {
+    referralCode?: string;
+    discountCode?: string;
+    attributionSource?: string;
+    bypassPendingGuard?: boolean;
+  },
 ): Promise<boolean> {
   const cooldownSeconds = currentCheckoutRateLimitSeconds();
   if (cooldownSeconds > 0) {
@@ -571,6 +587,7 @@ async function doCheckout(
         returnUrl: DASHBOARD_CHECKOUT_RETURN_URL,
         discountCode: options.discountCode,
         referralCode: options.referralCode,
+        attributionSource: options.attributionSource,
         // #4438: only set when the user confirmed "start a new checkout anyway"
         // from the pending-payment dialog. Skips the backend pending guard.
         ...(options.bypassPendingGuard ? { bypassPendingGuard: true } : {}),
@@ -879,7 +896,7 @@ async function openBillingPortal(token: string, preopened?: Window | null): Prom
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      signal: AbortSignal.timeout(15_000),
+      signal: createTimeoutSignal(15_000),
     });
 
     const result = await resp.json().catch(() => ({}));

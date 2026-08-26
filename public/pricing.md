@@ -16,14 +16,14 @@ Live tier/price/product-ID data (JSON): `GET https://www.worldmonitor.app/api/pr
 
 World Monitor attribution is optional in reports, presentations and derived analysis permitted by your plan. If you choose to credit us, "Source: World Monitor" or "via World Monitor" is sufficient. Source-specific notices supplied with an output still apply.
 
-These subscription licenses cover the hosted Service and its outputs. They are separate from the AGPL-3.0-only platform source-code license and the MIT licenses on the official thin clients. Full scope, examples and restrictions: https://worldmonitor.app/docs/terms#subscription-license-scope
+These subscription licenses cover the hosted Service and its outputs. They are separate from the AGPL-3.0-only platform source-code license and the MIT licenses on the official thin clients. Full scope, examples, output-retention classes and restrictions, covering the dashboard, desktop apps, API, MCP server, SDKs, embeds and alerts: https://worldmonitor.app/docs/eula
 
 ## Free
 
 - Price: $0/month
 - Signup required: No
 - Best for: Public situational awareness, OSINT research, market/geopolitical context, news monitoring
-- Includes: 56 map layers (all free except Resilience, which is Pro), 500+ curated feeds backed by 531+ observed upstream hosts, country briefs, hotspots, instability scores, chokepoints, cables, cascade analysis, breaking alert pipeline and watchlists
+- Includes: all registered map layers except the Pro-only Resilience layer, curated feeds backed by observed upstream hosts, country briefs, hotspots, instability scores, chokepoints, cables, cascade analysis, breaking alert pipeline and watchlists
 - Limits: 3 dashboard tabs; free dashboard refresh cadence is typically 5-15 minutes; advanced analyst, digest, API and team workflows require paid plans
 
 ## Pro
@@ -32,7 +32,8 @@ These subscription licenses cover the hosted Service and its outputs. They are s
 - Annual price: $359.99/year
 - Annual savings: 3 months free versus monthly billing
 - Best for: Investors, analysts, researchers, traders and operators who need the decision layer on top of the free dashboard
-- Includes: WM Analyst chat across 30+ live services with citations, Scenario Engine, Route Explorer, personal AI digest, custom widget builder, the Resilience map layer, MCP access and 60 tools under one key
+- Seats: 1 named user
+- Includes: WM Analyst chat across live services with citations, Scenario Engine, Route Explorer, personal AI digest, custom widget builder, the Resilience map layer, and MCP access under one key
 - License: Personal use
 - Limits: 10 custom dashboards, 500 dashboard-AI requests/day, MCP + SDK 50 calls/day
 - Digest cadence: Daily, twice-daily or weekly
@@ -43,7 +44,8 @@ These subscription licenses cover the hosted Service and its outputs. They are s
 - Price: $49.99/month
 - Annual price: $449.99/year
 - Annual savings: 3 months free versus monthly billing
-- Best for: Consultants, agencies and teams who use the Pro dashboard for client work, internal tools or reporting
+- Best for: Consultants, agencies and independent analysts who use the Pro dashboard for client work, internal tools or reporting
+- Seats: 1 named user — a seat is one person, not a shared login
 - Includes: Everything in Pro, plus data export (CSV, JSON and PDF reports)
 - License: Commercial license included — use WorldMonitor for client work, internal tools and reporting
 - Limits: 25 custom dashboards, 2,500 dashboard-AI requests/day, MCP + SDK 250 calls/day
@@ -102,8 +104,8 @@ These subscription licenses cover the hosted Service and its outputs. They are s
       "price_usd_monthly": 0,
       "signup_required": false,
       "features": [
-        "56 map layers (Resilience is Pro)",
-        "500+ feeds",
+        "global map coverage (Resilience is Pro)",
+        "curated feeds",
         "country briefs",
         "chokepoints",
         "instability scores",

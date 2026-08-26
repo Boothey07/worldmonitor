@@ -29,7 +29,7 @@ World Monitor is a real-time OSINT dashboard built with **Vanilla TypeScript** (
 | **TypeScript** | All code — frontend, edge functions, and handlers |
 | **Vite** | Build tool and dev server |
 | **Sebuf** | Proto-first HTTP RPC framework for typed API contracts |
-| **Protobuf / Buf** | Service and message definitions across 37 domains |
+| **Protobuf / Buf** | Service and message definitions across domains |
 | **MapLibre GL** | Base map rendering (tiles, globe mode, camera) |
 | **deck.gl** | WebGL overlay layers (scatterplot, geojson, arcs, heatmaps) |
 | **d3** | Charts, sparklines, and data visualization |
@@ -40,7 +40,7 @@ World Monitor is a real-time OSINT dashboard built with **Vanilla TypeScript** (
 
 ### Variant System
 
-The codebase produces 6 app variants from the same source, each targeting a different audience or use case:
+The codebase produces app variants from the same source, each targeting a different audience or use case:
 
 | Variant | Command | Focus |
 |---|---|---|
@@ -57,14 +57,14 @@ Variants share all code but differ in default panels, map layers, and RSS feeds.
 
 | Directory | Purpose |
 |---|---|
-| `src/components/` | UI components — 183 top-level TypeScript component files |
+| `src/components/` | UI components |
 | `src/services/` | Data fetching modules — sebuf client wrappers, AI, signal analysis |
 | `src/config/` | Static data and variant configs (feeds, geo, military, pipelines, ports) |
 | `src/generated/` | Auto-generated sebuf client + server stubs (**do not edit by hand**) |
 | `src/types/` | TypeScript type definitions |
-| `src/locales/` | i18n JSON files (26 languages) |
+| `src/locales/` | i18n JSON files |
 | `src/workers/` | Web Workers for analysis |
-| `server/` | Sebuf handler implementations for all 35 server handler domains |
+| `server/` | Sebuf handler implementations |
 | `api/` | Vercel Edge Functions (sebuf gateway + legacy endpoints) |
 | `proto/` | Protobuf service and message definitions |
 | `data/` | Static JSON datasets |
@@ -89,6 +89,9 @@ Variants share all code but differ in default panels, map layers, and RSS feeds.
 ## Development Setup
 
 ```bash
+# Check that your machine has what the build needs (see Build Prerequisites below)
+npm run check:prereqs
+
 # Install everything (buf CLI, sebuf plugins, npm deps, Playwright browsers)
 make install
 
@@ -120,6 +123,49 @@ npm run build:energy
 
 The dev server runs at `http://localhost:3000` (override the port with `DEV_PORT` in `.env.local`). Run `make help` to see all available make targets.
 
+### Build Prerequisites
+
+`npm run check:prereqs` reports everything missing in one pass and, when the
+local package archive confirms the names, prints a single install command for
+your distribution. It runs automatically before `npm run desktop:dev` and
+`npm run desktop:tauri:build`.
+
+```bash
+npm run check:prereqs              # everything
+npm run check:prereqs -- --scope web       # web app only
+npm run check:prereqs:desktop              # desktop development
+npm run check:prereqs:desktop:bundle       # desktop bundle, including AppImage tools
+npm run check:prereqs -- --json            # machine-readable, for CI
+npm run check:prereqs -- --warn-only       # report but do not fail
+```
+
+**Web app:** Node >= 22 (the floor CI builds on). Nothing else.
+
+**Desktop app (Tauri v2):** Rust via [rustup](https://rustup.rs), plus native
+libraries on Linux. macOS and Windows need only the Rust toolchain. On Linux
+the check covers WebKitGTK 4.1, JavaScriptCoreGTK 4.1, GTK 3, libsoup 3,
+GLib/GObject, Cairo, Pango, ATK and D-Bus — and, for AppImage bundling,
+librsvg2 (dev), patchelf and the FUSE 2 runtime.
+
+Two of these have bitten people and are worth knowing:
+
+- **librsvg2-dev, not just the runtime.** `linuxdeploy-plugin-gtk` locates the
+  SVG pixbuf loader via `pkg-config --variable=libdir librsvg-2.0`, so it needs
+  the `.pc` file from the `-dev` package. Without it, `tauri build` fails at the
+  very end with only `failed to run linuxdeploy` and no cause.
+- **Tauri v2 requires the 4.1 / libsoup3 line.** WebKitGTK 4.0 is the Tauri v1
+  pairing and will not satisfy this build.
+
+The check probes capabilities (pkg-config modules, sonames, commands) rather
+than package names, and resolves names against your archive, so distro renames
+such as Ubuntu's `libfuse2` → `libfuse2t64` t64 transition are handled
+automatically. Debian/Ubuntu, Fedora/RHEL, Arch and openSUSE families get an
+install command; other distributions get the capability list to map themselves.
+
+openSUSE package names are currently unverified — derived from naming
+convention rather than checked against a live archive — and the check says so
+when it prints them. Corrections welcome.
+
 ### Environment Variables (Optional)
 
 For full functionality, copy `.env.example` to `.env.local` and fill in the API keys you need. The app runs without any API keys — external data sources will simply be unavailable.
@@ -132,7 +178,7 @@ See the [API dependencies docs](https://www.worldmonitor.app/docs/getting-starte
 
 - **Bug fixes** — found something broken? Fix it!
 - **New data layers** — add new geospatial data sources to the map
-- **RSS feeds** — expand our 500+ feed collection with quality sources
+- **RSS feeds** — expand our curated feed collection with quality sources
 - **UI/UX improvements** — make the dashboard more intuitive
 - **Performance optimizations** — faster loading, better caching
 - **Documentation** — improve docs, add examples, fix typos
@@ -156,6 +202,11 @@ See the [API dependencies docs](https://www.worldmonitor.app/docs/getting-starte
 4. **Keep PRs focused** — one feature or fix per pull request
 5. **Write a clear description** explaining what your PR does and why
 6. **Link related issues** if applicable
+7. **Base recovery and follow-up PRs on `main`**, never on an in-flight branch. A stacked PR whose parent merges (and auto-deletes its branch) can still show `MERGED` while its commits never reach `main` (#7006).
+
+### Stacked PRs
+
+Target another feature branch only while that parent is still open. Once the parent merges, retarget the child to `main` before merging — or open the follow-up against `main` from the start. CI fails a child whose base branch's own PR is already merged, because that merge would land on a tombstone.
 
 ### PR Title Convention
 
@@ -278,6 +329,19 @@ For endpoints that deal with non-JSON payloads (XML feeds, binary data, HTML emb
 - Must have a permissive license or be public government data
 - Should update at least daily for real-time relevance
 - Must include geographic coordinates or be geo-locatable
+
+### Source attribution ledger
+
+Any new outbound host that appears in a URL literal under `scripts/`, `server/`, `api/`, or `src/` is discovered by `scripts/source-attribution.mjs` and needs a curated row in `shared/source-attribution-manifest.json`. This catches contributions that only add data — a feed URL, an MCP preset in `src/services/mcp-store.ts` — with no obvious link to the ledger:
+
+```bash
+npm run sources:check     # fails with "missing manifest entry for <host>"
+npm run sources:generate  # writes the row and regenerates docs/source-attribution.mdx
+```
+
+Give the host a display name only by adding it to `PROVIDER_OVERRIDES` in that script and bumping `PROVIDER_IDENTITY_REVIEW` to the recomputed digest; provider identities are hash-pinned so renaming one stays an explicit review event. Because the script lives inside the roots it scans, a URL you cite in one of its own strings counts as a discovered source — fine when that host is already registered (the licence links on existing rows), but citing an unregistered host invents a provider row for it.
+
+Two ordering rules follow from the manifest being a fixpoint of the source tree: a row cannot be added ahead of the code that introduces its host, and a rebase that lands alongside another attribution change should re-run `sources:generate` rather than hand-merge the generated files.
 
 ### Country boundary overrides
 

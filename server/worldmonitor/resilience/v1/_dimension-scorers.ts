@@ -2,16 +2,24 @@ import countryNames from '../../../../shared/country-names.json';
 import iso2ToIso3Json from '../../../../shared/iso2-to-iso3.json';
 import wgiIndicatorKeys from '../../../../shared/wgi-indicator-keys.json';
 import { normalizeCountryToken } from '../../../_shared/country-token';
-import { getCachedJson } from '../../../_shared/redis';
+import { getCachedEnvelopeJson, getCachedJson, readCachedJson } from '../../../_shared/redis';
+import { unwrapEnvelope } from '../../../_shared/seed-envelope';
 import { classifyDimensionFreshness, readFreshnessMap, resolveSeedMetaKey } from './_dimension-freshness';
 import { getLanguageCoverageFactor } from './_language-coverage';
 import { MACRO_FISCAL_INDICATOR_WEIGHTS } from './_macro-fiscal-weights';
+import { isInRankableUniverse } from './_rankable-universe';
 import {
   failedDimensionsFromDatasets,
   readFailedDatasets,
   readStandaloneSourceFailureDimensions,
   STANDALONE_SOURCE_META_MAX_STALE_MIN,
 } from './_source-failure';
+import {
+  applyCanadaNationalOverlay,
+  RESILIENCE_BOC_VALET_KEY,
+  RESILIENCE_STATCAN_WDS_KEY,
+  statcanOverlayUsed,
+} from './_canada-national-overlay';
 
 export type ResilienceDimensionId =
   | 'macroFiscal'
@@ -67,9 +75,14 @@ export interface ResilienceDimensionScore {
 
 export type ResilienceSeedReader = (key: string) => Promise<unknown | null>;
 
-interface WeightedMetric {
+export interface WeightedMetric {
   score: number | null;
   weight: number;
+  // A known malformed reading can preserve its design weight with a
+  // conservative fallback instead of letting weightedBlend renormalize the
+  // missing weight onto unrelated survivors. Genuine absence leaves this
+  // unset and keeps the existing coverage-weighted drop behavior.
+  fallbackScore?: number;
   // When a sub-metric is imputed (absence is a typed signal, not a gap), certaintyCoverage
   // expresses how confident we are in the imputation: 1.0 = real data, 0 = fully absent.
   // Omit for real data (auto: 1.0 if score != null, 0 if null).
@@ -317,6 +330,7 @@ const RESILIENCE_TRADE_RESTRICTIONS_KEY = 'trade:restrictions:v1:tariff-overview
 const RESILIENCE_TRADE_BARRIERS_KEY = 'trade:barriers:v1:tariff-gap:50';
 // plan 2026-04-25-004 Phase 2: financialSystemExposure component seed keys.
 const RESILIENCE_WB_EXTERNAL_DEBT_KEY = 'economic:wb-external-debt:v1';
+const RESILIENCE_WB_EXTERNAL_DEBT_SCHEMA_VERSION = 2;
 const RESILIENCE_BIS_LBS_KEY = 'economic:bis-lbs:v1';
 const RESILIENCE_FATF_LISTING_KEY = 'economic:fatf-listing:v1';
 const RESILIENCE_CYBER_KEY = 'cyber:threats:v2';
@@ -623,14 +637,14 @@ export function sqrtCount(value: number): number {
   return Math.sqrt(Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
-function normalizeLowerBetter(value: number, best: number, worst: number): number {
+export function normalizeLowerBetter(value: number, best: number, worst: number): number {
   if (!Number.isFinite(value)) return Number.NaN;
   if (worst <= best) return 50;
   const ratio = (worst - value) / (worst - best);
   return roundScore(ratio * 100);
 }
 
-function normalizeHigherBetter(value: number, worst: number, best: number): number {
+export function normalizeHigherBetter(value: number, worst: number, best: number): number {
   if (!Number.isFinite(value)) return Number.NaN;
   if (best <= worst) return 50;
   const ratio = (value - worst) / (best - worst);
@@ -734,6 +748,13 @@ export function scoreInflationStability(inflationPct: number): number {
 // blend rather than the band shape.
 export const FIN_SYS_BAND_ISOLATION_FLOOR = 30;
 export const FIN_SYS_BAND_OVEREXPOSED_FLOOR = 35;
+// The band SCORE at which the premium region begins — the value
+// `normalizeBandLowerBetter` returns, not a claims percentage. The band reaches
+// it twice: rising off the low-integration leg at 5% of GDP and falling back
+// through it on the over-exposure descent near 40.6%. Everything SCORING at or
+// below it is a pure level reading the diversity conditioning must not touch;
+// everything above is premium, on either leg.
+export const FIN_SYS_BAND_PREMIUM_FLOOR = 75;
 
 export function normalizeBandLowerBetter(value: number): number {
   if (!Number.isFinite(value) || value < 0) return 50;
@@ -754,6 +775,80 @@ export function normalizeBandLowerBetter(value: number): number {
   // 0: an entrepôt balance sheet is a different failure mode from severance,
   // and letting it fall below the isolation floor is what inverted the band.
   return roundScore(Math.max(FIN_SYS_BAND_OVEREXPOSED_FLOOR, 45 - (value - 60) * 0.5));
+}
+
+// The band's premium region (raw band > 75, i.e. claims in (5.4%, 40.59%] of
+// GDP — the ROUNDED band's actual crossings, since 75.5 is where it rounds
+// above 75; the unrounded 5%/40.9% figures pull in two countries that round to
+// exactly 75 and earn no premium, per the derivation in
+// docs/methodology/financial-system-exposure.md) is documented as "healthy
+// DIVERSIFIED financial system" —
+// but `normalizeBandLowerBetter` reads only the integration LEVEL. On the
+// 2026-08-12 production payload, 29 of the 77 premium-region countries held
+// that premium through ≤ 2 reporting parents: Bosnia took a 90 band on ONE
+// parent, Albania a 91 on two (its parents map is dominated by one Austrian
+// and one Italian group). Moderate integration through two doors is not a
+// diversified system — it is the 1997-Thailand / 2011-Greek-deleveraging
+// withdrawal channel, and the construct's own Component 4 scores that same
+// fact 11/100. Level and breadth are not independent: the level's meaning
+// flips with concentration, which is the same cross-component insight behind
+// `isMarketAccessConstrainedDebtSignal` (#6461).
+//
+// So the premium above the 75 low-integration boundary is scaled by the
+// construct's OWN redundancy transform — `normalizeHigherBetter(parents,
+// 1, 10)`, verbatim the Component 4 scale, no new constants. Everything at
+// or below 75 (both floors, the isolation leg, the deep over-exposure legs)
+// is untouched, so every #6459 band invariant survives:
+//
+//   conditioned = min(band, 75) + max(0, band − 75) × redundancy/100
+//
+//   - parents ≥ 10 → full premium (identical to the raw band everywhere);
+//   - parents ≤ 1  → no premium (band caps at the 75 boundary value);
+//   - continuous in claims for any fixed parent count (a scaled continuous
+//     premium added to a continuous base), monotone in parents;
+//   - a non-finite or absent `parentCount` earns NO premium: absence of
+//     diversity evidence is not diversity. Non-finite is handled explicitly
+//     rather than left to arithmetic — `normalizeHigherBetter` returns NaN for
+//     it, and `roundScore(NaN)` is 0, which would put a premium-region country
+//     BELOW the isolation floor and invert the very ranking this function
+//     exists to fix. The sibling `normalizeBandLowerBetter` neutralises
+//     malformed input the same way.
+//
+// Capping the band is necessary but not sufficient to make a `parentCount`
+// parse regression fail closed. The reader marks a present-but-invalid count
+// as malformed, and the blend retains that slot with a conservative fallback
+// score of zero. A genuinely absent count remains null without a fallback, so
+// it keeps the existing absence and coverage semantics.
+//
+// This distinction matters because `weightedBlend` otherwise renormalises a
+// missing Component 4 slot onto the survivors. For a country whose debt and
+// FATF legs read high, that can raise the published score. The generic blend
+// now supports an explicit fallback for this known-corrupt-input case; the
+// conditioning function only supplies the bounded band value and its signal.
+//
+// Known conservative edge: parentCount counts only parents above 1% of GDP,
+// so a country integrated through many sub-threshold parents forfeits a
+// premium its true breadth might merit. No production row currently has
+// premium-region claims with parentCount 0. The forfeit is bounded by the
+// premium itself: ≤ 25 points of band, and ≤ 7.5 of dimension ONLY while all
+// four slots resolve. `weightedBlend` renormalises the band's 0.30 onto the
+// surviving weight, so the dimension cost grows as siblings drop — 8.8 points
+// at coverage 0.85 (Component 4 gone), 11.5 at 0.65 (debt gone), 15 at 0.50.
+// It reaches ~14 band points at the worst arithmetically reachable case — 16
+// enumerated reporting parents each sitting just under the 1%-of-GDP counting
+// threshold, summing to ~16% of GDP for a raw band of 89.
+export function normalizeDiversityConditionedBand(
+  claimsPctGdp: number,
+  parentCount: number | null,
+): number {
+  const raw = normalizeBandLowerBetter(claimsPctGdp);
+  if (raw <= FIN_SYS_BAND_PREMIUM_FLOOR) return raw;
+  const redundancy = parentCount != null && Number.isFinite(parentCount)
+    ? normalizeHigherBetter(parentCount, 1, 10)
+    : 0;
+  return roundScore(
+    FIN_SYS_BAND_PREMIUM_FLOOR + (raw - FIN_SYS_BAND_PREMIUM_FLOOR) * (redundancy / 100),
+  );
 }
 
 // `normalizeSanctionCount` retired in plan 2026-04-25-004 Phase 1. The
@@ -785,16 +880,25 @@ const IMPUTATION_CLASS_TIE_BREAK: readonly ImputationClass[] = [
 const MINUTE_MS = 60 * 1000;
 const WGI_INDICATOR_KEYS: readonly string[] = wgiIndicatorKeys;
 
-function weightedBlend(metrics: WeightedMetric[]): ResilienceDimensionScore {
+export function weightedBlend(metrics: WeightedMetric[]): ResilienceDimensionScore {
   const totalWeight = metrics.reduce((sum, metric) => sum + metric.weight, 0);
   const available = metrics.filter(hasFiniteMetricScore);
   const availableWeight = available.reduce((sum, metric) => sum + metric.weight, 0);
+  const fallback = metrics.filter((metric) => !hasFiniteMetricScore(metric) && Number.isFinite(metric.fallbackScore));
+  const fallbackWeight = fallback.reduce((sum, metric) => sum + metric.weight, 0);
+  const scoringWeight = availableWeight + fallbackWeight;
 
-  if (!availableWeight || !totalWeight) {
+  if (!scoringWeight || !totalWeight) {
     return { score: 0, coverage: 0, observedWeight: 0, imputedWeight: 0, imputationClass: null, freshness: { lastObservedAtMs: 0, staleness: '' } };
   }
 
-  const weightedScore = available.reduce((sum, metric) => sum + metric.score * metric.weight, 0) / availableWeight;
+  // A malformed slot with an explicit fallback keeps its weight in the
+  // denominator. This prevents a low leg from disappearing and raising the
+  // published score, while ordinary absence still renormalizes as before.
+  const weightedScore = (
+    available.reduce((sum, metric) => sum + metric.score * metric.weight, 0)
+    + fallback.reduce((sum, metric) => sum + (metric.fallbackScore ?? 0) * metric.weight, 0)
+  ) / scoringWeight;
 
   // Coverage: weighted average of certainty per metric, computed against the
   // NOMINAL design-time weight rather than the runtime weight. Real data → 1.0;
@@ -969,19 +1073,113 @@ export function matchesCountryText(value: unknown, countryCode: string): boolean
 // dateToSortableNumber() removed in PR 3 §3.5: only the now-removed
 // getCountryBisExchangeRates() used it.
 
-async function defaultSeedReader(key: string): Promise<unknown | null> {
-  return getCachedJson(key, true);
+// `seed-meta:` reads gate FAIL-CLOSED preflights, so for them a read ERROR and
+// a genuine MISS must not be the same answer. `getCachedJson` collapses both to
+// `null` (see `readCachedJson`, which does distinguish them), and a preflight
+// reading that `null` declares the producer dead.
+//
+// #6484: within 25 minutes of the education activation deploying, that turned a
+// 1500 ms Upstash timeout under the concurrent ranking warm into
+// `source-failure` for 196/196 countries — published, and cached for six hours,
+// while the seeder was healthy and the payload was present.
+//
+// Retrying only the ERROR case keeps the alarm honest: a genuinely absent
+// seed-meta still returns `null` on the first read and still fails closed,
+// which is the signal that a Railway bundle is not publishing.
+const SEED_META_READ_ATTEMPTS = 3;
+const SEED_META_RETRY_BASE_MS = 120;
+
+function isSeedMetaKey(key: string): boolean {
+  return key.startsWith('seed-meta:');
 }
 
-export function createMemoizedSeedReader(reader: ResilienceSeedReader = defaultSeedReader): ResilienceSeedReader {
-  const cache = new Map<string, Promise<unknown | null>>();
-  return async (key: string) => {
-    if (!cache.has(key)) {
-      const p = Promise.resolve(reader(key));
-      cache.set(key, p);
-      p.catch(() => cache.delete(key));
+async function readSeedMetaResilient(key: string): Promise<unknown | null> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < SEED_META_READ_ATTEMPTS; attempt++) {
+    const read = await readCachedJson(key, true);
+    if (read.status === 'hit') return read.value;
+    // A genuine miss is information, not a failure — return it immediately so
+    // a dead producer still fails closed on the first attempt.
+    if (read.status === 'miss') return null;
+    lastError = read.error;
+    if (attempt < SEED_META_READ_ATTEMPTS - 1) {
+      await new Promise((resolve) => { setTimeout(resolve, SEED_META_RETRY_BASE_MS * 2 ** attempt); });
     }
-    return cache.get(key)!;
+  }
+  // Still failing after retries. Return null so behaviour matches today's
+  // fail-closed path rather than introducing a new throwing mode under load,
+  // but say so — an operator seeing source-failure needs to know whether the
+  // producer is dead or Redis was unreachable.
+  console.warn(
+    `[Resilience] seed-meta read failed after ${SEED_META_READ_ATTEMPTS} attempts key=${key} `
+    + `error=${lastError instanceof Error ? lastError.message : String(lastError)} — `
+    + 'downstream preflights will fail closed; this is a READ failure, not proof the producer is dead',
+  );
+  return null;
+}
+
+async function defaultSeedReader(key: string): Promise<unknown | null> {
+  if (isSeedMetaKey(key)) return readSeedMetaResilient(key);
+  // Preserve the contract envelope for WB debt so its numeric schemaVersion
+  // remains available to the fail-closed scorer. Other seed readers retain
+  // the established bare-data behavior.
+  return key === RESILIENCE_WB_EXTERNAL_DEBT_KEY
+    ? getCachedEnvelopeJson(key, true)
+    : getCachedJson(key, true);
+}
+
+interface MemoizedSeedReaderOptions {
+  retryJoinedSeedMetaNull?: boolean;
+}
+
+export function createMemoizedSeedReader(
+  reader: ResilienceSeedReader = defaultSeedReader,
+  options: MemoizedSeedReaderOptions = {},
+): ResilienceSeedReader {
+  const cache = new Map<string, Promise<unknown | null>>();
+  const seedMetaRecoveryReads = new Map<string, Promise<unknown | null>>();
+  return async (key: string) => {
+    let pendingRead = cache.get(key);
+    const joinedExistingRead = pendingRead != null;
+    if (!pendingRead) {
+      pendingRead = Promise.resolve(reader(key));
+      cache.set(key, pendingRead);
+      pendingRead.catch(() => {
+        if (cache.get(key) === pendingRead) cache.delete(key);
+      });
+      // Do NOT retain a null seed-meta result. This memo is shared across every
+      // country in a ranking build, so caching one unresolved read propagates it
+      // to all 196 — the #6484 amplifier.
+      if (isSeedMetaKey(key)) {
+        pendingRead.then((value) => {
+          if (value == null && cache.get(key) === pendingRead) cache.delete(key);
+        }, () => {});
+      }
+    }
+    const value = await pendingRead;
+    // #6510: eviction after resolution is too late for callers that already
+    // joined the same in-flight promise. If its retries exhaust, let only the
+    // creator observe that fail-closed null; joined countries share one recovery
+    // read instead of turning one transient failure into either a batch-wide
+    // outage or a 195-request retry herd. A genuine missing producer costs one
+    // extra read for the batch and stays fail-closed for every caller.
+    if (options.retryJoinedSeedMetaNull && joinedExistingRead && isSeedMetaKey(key) && value == null) {
+      let recoveryRead = seedMetaRecoveryReads.get(key);
+      if (!recoveryRead) {
+        recoveryRead = Promise.resolve(reader(key));
+        seedMetaRecoveryReads.set(key, recoveryRead);
+        cache.set(key, recoveryRead);
+        recoveryRead.then((recoveredValue) => {
+          if (seedMetaRecoveryReads.get(key) === recoveryRead) seedMetaRecoveryReads.delete(key);
+          if (recoveredValue == null && cache.get(key) === recoveryRead) cache.delete(key);
+        }, () => {
+          if (seedMetaRecoveryReads.get(key) === recoveryRead) seedMetaRecoveryReads.delete(key);
+          if (cache.get(key) === recoveryRead) cache.delete(key);
+        });
+      }
+      return recoveryRead;
+    }
+    return value;
   };
 }
 
@@ -1376,15 +1574,23 @@ export async function scoreMacroFiscal(
   countryCode: string,
   reader: ResilienceSeedReader = defaultSeedReader,
 ): Promise<ResilienceDimensionScore> {
-  const [debtRaw, imfMacroRaw, imfLaborRaw, bisDsrRaw] = await Promise.all([
+  const [debtRaw, imfMacroRaw, imfLaborRaw, bisDsrRaw, bocRaw, statcanRaw] = await Promise.all([
     reader(RESILIENCE_NATIONAL_DEBT_KEY),
     reader(RESILIENCE_IMF_MACRO_KEY),
     reader(RESILIENCE_IMF_LABOR_KEY),
     reader(RESILIENCE_BIS_DSR_KEY),
+    countryCode === 'CA' ? reader(RESILIENCE_BOC_VALET_KEY) : Promise.resolve(null),
+    countryCode === 'CA' ? reader(RESILIENCE_STATCAN_WDS_KEY) : Promise.resolve(null),
   ]);
   const debtEntry = getLatestDebtEntry(debtRaw, countryCode);
-  const imfEntry = getImfMacroEntry(imfMacroRaw, countryCode);
-  const laborEntry = getImfLaborEntry(imfLaborRaw, countryCode);
+  const overlay = applyCanadaNationalOverlay(
+    countryCode,
+    getImfMacroEntry(imfMacroRaw, countryCode),
+    getImfLaborEntry(imfLaborRaw, countryCode),
+    { boc: bocRaw as never, statcan: statcanRaw as never },
+  );
+  const imfEntry = overlay.imfEntry;
+  const laborEntry = overlay.laborEntry;
   const dsrEntry = getBisDsrEntry(bisDsrRaw, countryCode);
 
   return weightedBlend([
@@ -1410,7 +1616,7 @@ export async function scoreMacroFiscal(
           score: imfEntry?.currentAccountPct == null ? null : normalizeHigherBetter(Math.max(-20, Math.min(imfEntry.currentAccountPct, 20)), -20, 20),
           weight: MACRO_FISCAL_INDICATOR_WEIGHTS.currentAccountPct,
         },
-    imfLaborRaw == null
+    imfLaborRaw == null && !overlay.usedStatcanUnemployment
       ? { score: null, weight: MACRO_FISCAL_INDICATOR_WEIGHTS.unemploymentPct }
       : {
           score: laborEntry?.unemploymentPct == null ? null : normalizeLowerBetter(Math.max(3, Math.min(laborEntry.unemploymentPct, 25)), 3, 25),
@@ -1454,14 +1660,23 @@ export async function scoreCurrencyExternal(
   countryCode: string,
   reader: ResilienceSeedReader = defaultSeedReader,
 ): Promise<ResilienceDimensionScore> {
-  const [imfMacroRaw, staticRecord] = await Promise.all([
+  const [imfMacroRaw, staticRecord, bocRaw, statcanRaw] = await Promise.all([
     reader(RESILIENCE_IMF_MACRO_KEY),
     readStaticCountry(countryCode, reader),
+    countryCode === 'CA' ? reader(RESILIENCE_BOC_VALET_KEY) : Promise.resolve(null),
+    countryCode === 'CA' ? reader(RESILIENCE_STATCAN_WDS_KEY) : Promise.resolve(null),
   ]);
 
-  const imfEntry = getImfMacroEntry(imfMacroRaw, countryCode);
+  const overlay = applyCanadaNationalOverlay(
+    countryCode,
+    getImfMacroEntry(imfMacroRaw, countryCode),
+    null,
+    { boc: bocRaw as never, statcan: statcanRaw as never },
+  );
+  const imfEntry = overlay.imfEntry;
   const inflationPct = safeNum(imfEntry?.inflationPct);
-  const hasInflation = imfMacroRaw != null && inflationPct != null;
+  // StatCan CPI must score even when the IMF macro envelope is missing.
+  const hasInflation = inflationPct != null;
   const inflationScore = hasInflation
     ? scoreInflationStability(inflationPct!)
     : null;
@@ -1577,7 +1792,9 @@ export async function scoreTradePolicy(
 // Components (weights total 1.0):
 //   short_term_external_debt_pct_gni     0.35 (WB IDS — lowerBetter; goalpost worst=15% best=0%;
 //                                              non-DRS jurisdictions impute — see resolveNonDrsDebtImputation)
-//   bis_lbs_xborder_us_eu_uk_pct_gdp     0.30 (BIS CBS by-parent — asymmetric U-shape band)
+//   bis_lbs_xborder_us_eu_uk_pct_gdp     0.30 (BIS CBS by-parent — asymmetric U-shape band;
+//                                              premium above 75 scaled by parent redundancy —
+//                                              see normalizeDiversityConditionedBand)
 //   fatf_listing_status                   0.20 (FATF — discrete: black=0, gray=55, compliant=100)
 //   financial_center_redundancy           0.15 (BIS CBS by-parent count — higherBetter; goalpost worst=1 best=10)
 //
@@ -1607,9 +1824,41 @@ function isFinSysExposureEnabledLocal(): boolean {
 }
 
 const RESILIENCE_EDUCATION_KEY = 'resilience:education-attainment:v1';
+export const EDUCATION_ACTIVATION_MIN_COUNTRIES = 180;
 
-function isEducationEnabledLocal(): boolean {
-  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'false').toLowerCase() === 'true';
+function readEducationRankableRecordCount(meta: unknown): number | null {
+  if (meta == null || typeof meta !== 'object' || Array.isArray(meta)) return null;
+  const numeric = Number((meta as { rankableRecordCount?: unknown }).rankableRecordCount);
+  if (Number.isSafeInteger(numeric) && numeric >= 0) return numeric;
+
+  // Transition support for seed-meta written before rankableRecordCount was
+  // added. The prior seeder already persisted the exact rankable country set,
+  // so it can prove the same floor without waiting for the next weekly publish.
+  const rawCountrySet = (meta as { countrySet?: unknown }).countrySet;
+  if (typeof rawCountrySet !== 'string' || rawCountrySet.length === 0) return null;
+  const codes = rawCountrySet.split(',').map((code) => code.trim());
+  if (codes.some((code) => !/^[A-Z]{2}$/.test(code) || !isInRankableUniverse(code))) return null;
+  return new Set(codes).size;
+}
+
+// #6460 activation contract. The default is `true`, so the promotion PR is the
+// flip rather than a config change that has to land separately.
+//
+// Why the default and not a production env var, unlike energy v2 and
+// financialSystemExposure: education is the first dimension whose activation is
+// CI-COUPLED to its own flag. The active release gate removes `education` from
+// its fixture allow-list, while `RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE`
+// retains the dimension for the explicit false rollback. That runtime helper
+// keys on the unique triple-zero shape, so active observations and source
+// failures remain counted. A default of `false` would require the env var in
+// BOTH CI and Vercel, splitting "is education on" across two config surfaces.
+//
+// `RESILIENCE_EDUCATION_ENABLED=false` in the production environment remains
+// the rollback kill switch — identical to the previous rollback story, just
+// inverted in which direction needs the explicit setting. See
+// `docs/methodology/education-flag-flip-runbook.md` § Rollback.
+export function isEducationEnabled(): boolean {
+  return (process.env.RESILIENCE_EDUCATION_ENABLED ?? 'true').toLowerCase() === 'true';
 }
 
 // Certainty ladder for a stale-but-present observation. Attainment of the 25+
@@ -1634,7 +1883,7 @@ export async function scoreEducation(
   countryCode: string,
   reader: ResilienceSeedReader = defaultSeedReader,
 ): Promise<ResilienceDimensionScore> {
-  if (!isEducationEnabledLocal()) {
+  if (!isEducationEnabled()) {
     // Flag off — empty-data shape, contributes zero weight to the domain mean.
     // imputationClass stays null: a dark dimension is a deliberate construct
     // state, not an outage, and tagging it `source-failure` would render a
@@ -1663,8 +1912,60 @@ export async function scoreEducation(
     );
   }
 
+  const rankableRecordCount = readEducationRankableRecordCount(meta);
+  if (rankableRecordCount == null || rankableRecordCount < EDUCATION_ACTIVATION_MIN_COUNTRIES) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but ${RESILIENCE_EDUCATION_KEY} rankable coverage is ` +
+        `${rankableRecordCount ?? 'unproven'}/${EDUCATION_ACTIVATION_MIN_COUNTRIES}. ` +
+        'Wait for a healthy education seed above the activation floor, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
+
   const raw = await reader(RESILIENCE_EDUCATION_KEY);
+  const countries = raw != null && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as { countries?: unknown }).countries
+    : null;
+  if (
+    countries == null ||
+    typeof countries !== 'object' ||
+    Array.isArray(countries)
+  ) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but the ${RESILIENCE_EDUCATION_KEY} data payload is missing, malformed, or empty. ` +
+        'Confirm the education seeder wrote a non-empty countries envelope, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
   const record = readEducationAttainment(raw, countryCode);
+
+  if (Object.prototype.hasOwnProperty.call(countries, countryCode) && record == null) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but ${RESILIENCE_EDUCATION_KEY} has a malformed record for ${countryCode}. ` +
+        'Confirm the education seeder wrote finite value/year fields in the expected range, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
+
+  let usableRankableRecordCount = 0;
+  for (const country in countries) {
+    if (
+      Object.prototype.hasOwnProperty.call(countries, country) &&
+      Object.prototype.hasOwnProperty.call(ISO2_TO_ISO3, country) &&
+      isInRankableUniverse(country) &&
+      readEducationAttainment(raw, country) != null
+    ) {
+      usableRankableRecordCount += 1;
+    }
+  }
+  if (usableRankableRecordCount < EDUCATION_ACTIVATION_MIN_COUNTRIES) {
+    throw new ResilienceConfigurationError(
+      `RESILIENCE_EDUCATION_ENABLED=true but the ${RESILIENCE_EDUCATION_KEY} data payload has usable rankable coverage ` +
+        `${usableRankableRecordCount}/${EDUCATION_ACTIVATION_MIN_COUNTRIES}. ` +
+        'Confirm the education seeder wrote enough finite value/year records, or set RESILIENCE_EDUCATION_ENABLED=false to roll back.',
+      [RESILIENCE_EDUCATION_KEY],
+    );
+  }
 
   if (record == null) {
     // Country absent from the envelope. This is `unmonitored`, NOT
@@ -1728,6 +2029,10 @@ function readEducationAttainment(
   // Percentage of population; anything outside 0..100 is upstream corruption,
   // matching the range check the seeder enforces on write.
   if (value < 0 || value > 100) return null;
+  // World Bank observation years are whole Gregorian years. Keep this read
+  // contract aligned with the seeder and the Edge health payload probe so a
+  // record cannot count as healthy while the scorer interprets a corrupt year.
+  if (!Number.isSafeInteger(year) || year < 1900 || year > 2200) return null;
   return { value, year };
 }
 
@@ -1802,6 +2107,9 @@ export async function scoreFinancialSystemExposure(
     };
   }
 
+  const normalizedCountryCode = countryCode.toUpperCase();
+  const isComprehensiveEmbargo = FIN_SYS_EXPOSURE_COMPREHENSIVE_EMBARGO.has(normalizedCountryCode);
+
   // Preflight: verify the 3 required seed envelopes are published and fresh.
   // `runSeed` (scripts/_seed-utils.mjs) STRIPS the trailing :v\d+ from the
   // data key when it writes seed-meta — so `economic:wb-external-debt:v1`
@@ -1818,9 +2126,10 @@ export async function scoreFinancialSystemExposure(
     RESILIENCE_FATF_LISTING_KEY,
   ] as const;
   const unhealthy: string[] = [];
-  for (const key of requiredSeedKeys) {
-    const meta = await reader(resolveSeedMetaKey(key));
-    if (isSeedMetaPreflightUnhealthy(key, meta)) unhealthy.push(key);
+  // Independent keys — read concurrently instead of serially (saves ~2 Redis RTTs of latency).
+  const metas = await Promise.all(requiredSeedKeys.map((key) => reader(resolveSeedMetaKey(key))));
+  for (const [i, key] of requiredSeedKeys.entries()) {
+    if (isSeedMetaPreflightUnhealthy(key, metas[i])) unhealthy.push(key);
   }
   if (unhealthy.length > 0) {
     throw new ResilienceConfigurationError(
@@ -1848,8 +2157,8 @@ export async function scoreFinancialSystemExposure(
   const debtEnvelope = readWbExternalDebtEnvelope(debtRaw);
   if (debtEnvelope == null) {
     throw new ResilienceConfigurationError(
-      `RESILIENCE_FIN_SYS_EXPOSURE_ENABLED=true but ${RESILIENCE_WB_EXTERNAL_DEBT_KEY} data envelope is absent or malformed after a healthy seed-meta preflight. ` +
-        'Re-run seed-wb-external-debt and confirm the payload includes countries before scoring.',
+      `RESILIENCE_FIN_SYS_EXPOSURE_ENABLED=true requires ${RESILIENCE_WB_EXTERNAL_DEBT_KEY} schema v2 with valid countries and nonDrsCountryCodes after a healthy seed-meta preflight. ` +
+        'Re-run seed-wb-external-debt and confirm the published envelope schema before scoring.',
       [RESILIENCE_WB_EXTERNAL_DEBT_KEY],
     );
   }
@@ -1870,10 +2179,12 @@ export async function scoreFinancialSystemExposure(
   //   parentCount: number, parents: { [parentIso2]: number } } } }.
   const bisCountry = readBisLbsCountry(bisRaw, countryCode);
 
-  // Component 3: FATF listing status. Discrete classification.
+  // Component 3: FATF listing status. Discrete classification. Preserve
+  // whether `compliant` was explicitly published or inferred from absence so
+  // a data-desert country cannot turn list absence into a perfect score.
   // Payload shape: { listings: { [iso2]: 'black' | 'gray' | 'compliant' },
   //   publicationDate: string }.
-  const fatfStatus = readFatfStatus(fatfRaw, countryCode);
+  const fatfObservation = readFatfStatus(fatfRaw, countryCode);
 
   // #6459 Component 1 slot. WB International Debt Statistics is the output of
   // the Debtor Reporting System, whose membership is World Bank BORROWERS —
@@ -1894,34 +2205,84 @@ export async function scoreFinancialSystemExposure(
   const nonDrsDebtImputation = resolveNonDrsDebtImputation(
     debtPct,
     bisCountry,
-    debtEnvelope.nonDrsCountryCodes.has(countryCode.toUpperCase()),
+    debtEnvelope.nonDrsCountryCodes.has(normalizedCountryCode),
   );
+
+  const marketAccessConstrainedDebt = isMarketAccessConstrainedDebtSignal(debtPct, bisCountry);
+  const fatfIsOnlyResolvingComponent = debtPct == null
+    && nonDrsDebtImputation == null
+    && bisCountry?.totalXborderPctGdp == null
+    && bisCountry?.parentCount == null;
+  const dropFatfCompliantByAbsence = fatfObservation?.assignedByAbsence === true
+    && fatfIsOnlyResolvingComponent
+    // CU is intentionally preserved: the comprehensive-embargo cap is an
+    // external construct signal, and its non-zero observed FATF slot keeps the
+    // executable sanctions anchor from passing vacuously at zero coverage.
+    && !isComprehensiveEmbargo;
 
   const blended = weightedBlend([
     {
       score: debtPct != null
         ? normalizeLowerBetter(debtPct, 0, 15)
         : (nonDrsDebtImputation?.score ?? null),
-      weight: 0.35,
-      certaintyCoverage: nonDrsDebtImputation?.certaintyCoverage,
+      // #6461: a tiny debt stock is not full-strength evidence of low
+      // rollover vulnerability when the same country has near-zero BIS
+      // claims and no foreign reporting parents. Those three observed signals
+      // together proxy market-access constraint using data already in the
+      // construct. Retain the reading at low confidence instead of deleting it
+      // or introducing a new editorial country list.
+      weight: marketAccessConstrainedDebt
+        ? FIN_SYS_SHORT_TERM_DEBT_WEIGHT * FIN_SYS_MARKET_ACCESS_CONSTRAINED_DEBT_CERTAINTY
+        : FIN_SYS_SHORT_TERM_DEBT_WEIGHT,
+      nominalWeight: FIN_SYS_SHORT_TERM_DEBT_WEIGHT,
+      certaintyCoverage: marketAccessConstrainedDebt
+        ? FIN_SYS_MARKET_ACCESS_CONSTRAINED_DEBT_CERTAINTY
+        : nonDrsDebtImputation?.certaintyCoverage,
       imputed: nonDrsDebtImputation != null ? true : undefined,
       imputationClass: nonDrsDebtImputation?.imputationClass,
     },
     {
+      // Diversity-conditioned: the sweet-spot premium is earned only in
+      // proportion to demonstrated parent breadth (see
+      // `normalizeDiversityConditionedBand`). Passing `parentCount` from the
+      // same BIS row keeps level and breadth reads consistent per country.
+      // A missing count caps the premium here. A malformed claims field is
+      // also retained as a conservative zero fallback by weightedBlend so a
+      // parser regression cannot free this slot's weight onto unrelated legs.
+      //
+      // This slot now has TWO designed inputs (level and breadth), so it can
+      // resolve only half-observed. `certaintyCoverage` says which: a withheld
+      // premium is a substituted floor, not a redundancy-scaled reading, and
+      // reporting it at full certainty would claim evidence that never arrived.
+      // The sibling debt slot already draws exactly this distinction via
+      // `nonDrsDebtImputation` / #6461. Only `certaintyCoverage` is set, never
+      // `imputed`/`imputationClass`: the score is a conservative bound taken
+      // from the observed level, not a value inferred from an absence model,
+      // and it must not enter the imputed-weight accounting as if it were.
       score: bisCountry?.totalXborderPctGdp == null
         ? null
-        : normalizeBandLowerBetter(bisCountry.totalXborderPctGdp),
-      weight: 0.30,
+        : normalizeDiversityConditionedBand(bisCountry.totalXborderPctGdp, bisCountry.parentCount),
+      weight: FIN_SYS_BAND_WEIGHT,
+      fallbackScore: bisCountry?.totalXborderPctGdpMalformed ? 0 : undefined,
+      certaintyCoverage: resolveFinSysBandCertainty(bisCountry),
     },
     {
-      score: fatfStatus == null ? null : fatfStatusToScore(fatfStatus),
-      weight: 0.20,
+      score: fatfObservation == null || dropFatfCompliantByAbsence
+        ? null
+        : fatfStatusToScore(fatfObservation.status),
+      weight: FIN_SYS_FATF_WEIGHT,
     },
     {
       score: bisCountry?.parentCount == null
         ? null
         : normalizeHigherBetter(bisCountry.parentCount, 1, 10),
-      weight: 0.15,
+      weight: FIN_SYS_REDUNDANCY_WEIGHT,
+      fallbackScore: bisCountry?.parentCountMalformed ? 0 : undefined,
+      // A count computed over an incomplete reporting-parent set is an
+      // undercount, not an observation — same reasoning as the band slot.
+      certaintyCoverage: bisCountry != null && !bisCountry.parentSetComplete
+        ? FIN_SYS_BIS_DEGRADED_PARENT_SET_CERTAINTY
+        : undefined,
     },
   ]);
 
@@ -1931,7 +2292,7 @@ export async function scoreFinancialSystemExposure(
   // was actually read. An operator inspecting a capped country still sees
   // which components resolved.
   if (
-    FIN_SYS_EXPOSURE_COMPREHENSIVE_EMBARGO.has(countryCode.toUpperCase())
+    isComprehensiveEmbargo
     && blended.score > FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP
   ) {
     return { ...blended, score: FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP };
@@ -1975,28 +2336,37 @@ interface WbExternalDebtEnvelope {
 
 function readWbExternalDebtEnvelope(raw: unknown): WbExternalDebtEnvelope | null {
   if (raw == null || typeof raw !== 'object') return null;
-  const countries = (raw as { countries?: Record<string, unknown> }).countries;
+  const unwrapped = unwrapEnvelope(raw);
+  const schemaVersion = unwrapped._seed?.schemaVersion
+    ?? (raw as { schemaVersion?: unknown }).schemaVersion;
+  if (
+    typeof schemaVersion !== 'number'
+    || !Number.isInteger(schemaVersion)
+    || schemaVersion < RESILIENCE_WB_EXTERNAL_DEBT_SCHEMA_VERSION
+  ) return null;
+  const payload = unwrapped.data;
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const countries = (payload as { countries?: Record<string, unknown> }).countries;
   if (!countries || typeof countries !== 'object' || Array.isArray(countries) || Object.keys(countries).length === 0) {
     return null;
   }
 
-  const rawNonDrsCountryCodes = (raw as { nonDrsCountryCodes?: unknown }).nonDrsCountryCodes;
-  if (
-    rawNonDrsCountryCodes != null
-    && (
-      !Array.isArray(rawNonDrsCountryCodes)
-      || rawNonDrsCountryCodes.some((code) => typeof code !== 'string' || !/^[A-Z]{2}$/.test(code))
-      || new Set(rawNonDrsCountryCodes).size !== rawNonDrsCountryCodes.length
-    )
-  ) {
-    return null;
+  const rawNonDrsCountryCodes = (payload as { nonDrsCountryCodes?: unknown }).nonDrsCountryCodes;
+  // Match the producer's fail-closed floor so an empty or truncated cohort
+  // cannot preserve the schema shape while silently disabling imputation.
+  if (!Array.isArray(rawNonDrsCountryCodes) || rawNonDrsCountryCodes.length < 40) return null;
+
+  const nonDrsCountryCodes = new Set<string>();
+  for (const code of rawNonDrsCountryCodes) {
+    if (typeof code !== 'string' || !/^[A-Z]{2}$/.test(code) || nonDrsCountryCodes.has(code)) return null;
+    nonDrsCountryCodes.add(code);
   }
 
   return {
     countries,
-    // Backward-compatible with the last v1 payload: until the v2 seeder runs,
-    // unknown eligibility stays null/drop rather than receiving an imputation.
-    nonDrsCountryCodes: new Set((rawNonDrsCountryCodes ?? []) as string[]),
+    // The active scorer requires schema v2. Accepting the former v1 shape here
+    // silently disables the non-DRS imputation for every eligible country.
+    nonDrsCountryCodes,
   };
 }
 
@@ -2009,6 +2379,144 @@ function readWbExternalDebtPct(envelope: WbExternalDebtEnvelope, countryCode: st
 interface BisLbsCountry {
   totalXborderPctGdp: number | null;
   parentCount: number | null;
+  // True when the field was present but failed the reader's type/range
+  // contract. A genuinely absent field remains distinguishable and keeps the
+  // scorer's existing coverage-weighted absence behavior.
+  totalXborderPctGdpMalformed: boolean;
+  parentCountMalformed: boolean;
+  /**
+   * False when the seed envelope reports that the BIS collection ran with an
+   * incomplete reporting-parent set (`successfulParents < parentCountries`).
+   * `seed-bis-lbs.mjs` tolerates up to 4 of its 16 parent fetches failing with
+   * only a `console.warn` (`MIN_SUCCESSFUL_PARENTS`), and a missing parent feed
+   * silently lowers `parentCount` for every country it would have covered. That
+   * used to move only Component 4 (weight 0.15); since the band premium is
+   * conditioned on the same count it now moves Component 2 (0.30) as well, so
+   * the incompleteness has to reach the blend as reduced certainty instead of
+   * passing as an observed reading. True when the envelope does not report the
+   * ratio at all — absence of the field is not evidence of degradation.
+   */
+  parentSetComplete: boolean;
+}
+
+// #6461 market-access proxy. Reuse the construct's existing component
+// boundaries instead of adding an unverified source: <=1% short-term debt is
+// structurally tiny, <5% BIS claims is below the healthy integration band, and
+// zero reporting parents means no independent foreign-bank route clears the
+// redundancy floor. All three must hold, so ordinary low-debt borrowers keep
+// full weight when either banking signal shows real market access.
+// Component weights, total 1.0. Exported and named rather than inline literals
+// so the calibration tests can blend against the SAME numbers production uses.
+// A test that restates `0.35` / `0.30` in its own arithmetic silently diverges
+// the moment a weight is retuned, and the divergence shows up as a wrong
+// baseline rather than as a failure.
+export const FIN_SYS_SHORT_TERM_DEBT_WEIGHT = 0.35;
+export const FIN_SYS_BAND_WEIGHT = 0.30;
+export const FIN_SYS_FATF_WEIGHT = 0.20;
+export const FIN_SYS_REDUNDANCY_WEIGHT = 0.15;
+// Component 4's goalposts, shared with the band premium's redundancy scale, and
+// Component 1's (short-term external debt, % of GNI; lowerBetter).
+//
+// These are re-exported for the calibration mirror but MUST stay numeric
+// literals at their call sites: `tests/helpers/resilience-scorer-doc-parity-specs.mts`
+// parses this file's source text and asserts the normalizer anchors are literals
+// so it can cross-check them against the methodology doc's goalposts. Naming
+// them at the call site makes that gate fail closed ("anchors must be numeric
+// literals"), which is the gate working as intended — the doc/code parity check
+// cannot resolve an identifier.
+export const FIN_SYS_REDUNDANCY_WORST_PARENTS = 1;
+export const FIN_SYS_REDUNDANCY_BEST_PARENTS = 10;
+export const FIN_SYS_DEBT_BEST_PCT_GNI = 0;
+export const FIN_SYS_DEBT_WORST_PCT_GNI = 15;
+export const FIN_SYS_MARKET_ACCESS_CONSTRAINED_DEBT_CERTAINTY = 0.3;
+export const FIN_SYS_MARKET_ACCESS_LOW_DEBT_PCT_GNI_MAX = 1;
+export const FIN_SYS_MARKET_ACCESS_LOW_CLAIMS_PCT_GDP_MAX = 5;
+
+// Certainty for the band slot when its integration LEVEL resolved but parent
+// BREADTH did not, so `normalizeDiversityConditionedBand` had to withhold the
+// premium for absence of evidence. One of the slot's two designed inputs was
+// observed, hence 0.5 — the fraction of the slot's evidence that arrived, on
+// the same "retain the reading at reduced confidence" principle as #6461's
+// market-access attenuation rather than a tuned constant.
+export const FIN_SYS_BAND_BREADTH_UNOBSERVED_CERTAINTY = 0.5;
+
+// Certainty for BOTH BIS-derived slots when the seed envelope reports an
+// incomplete reporting-parent collection. The count is then an undercount of
+// unknown size, so neither the redundancy reading nor the premium it scales is
+// a full observation.
+export const FIN_SYS_BIS_DEGRADED_PARENT_SET_CERTAINTY = 0.5;
+
+/**
+ * Certainty for the diversity-conditioned band slot.
+ *
+ * Two independent reasons the slot can be less than fully observed, and they
+ * can co-occur, so the lower one wins rather than compounding:
+ *   - breadth never resolved (`parentCount == null`) AND the raw band sits in
+ *     the premium region, so the withheld premium actually cost the score
+ *     something. Below the premium floor the conditioning is a no-op and the
+ *     band is a pure level reading, fully observed.
+ *   - the collection ran with an incomplete parent set, so any count it did
+ *     produce is an undercount.
+ *
+ * Note the deliberate `null` vs `0` distinction: `parentCount === 0` is an
+ * OBSERVATION (no parent clears the 1%-of-GDP counting threshold) and keeps
+ * full certainty; `null` is an absence.
+ */
+function resolveFinSysBandCertainty(bisCountry: BisLbsCountry | null): number | undefined {
+  if (bisCountry == null || bisCountry.totalXborderPctGdp == null) return undefined;
+  const reductions: number[] = [];
+  if (
+    bisCountry.parentCount == null
+    && normalizeBandLowerBetter(bisCountry.totalXborderPctGdp) > FIN_SYS_BAND_PREMIUM_FLOOR
+  ) {
+    reductions.push(FIN_SYS_BAND_BREADTH_UNOBSERVED_CERTAINTY);
+  }
+  if (!bisCountry.parentSetComplete) {
+    reductions.push(FIN_SYS_BIS_DEGRADED_PARENT_SET_CERTAINTY);
+  }
+  return reductions.length === 0 ? undefined : Math.min(...reductions);
+}
+
+function isMarketAccessConstrainedDebtSignal(
+  debtPct: number | null,
+  bisCountry: BisLbsCountry | null,
+): boolean {
+  if (debtPct == null || debtPct < 0 || debtPct > FIN_SYS_MARKET_ACCESS_LOW_DEBT_PCT_GNI_MAX) return false;
+  const claims = bisCountry?.totalXborderPctGdp;
+  const parents = bisCountry?.parentCount;
+  return claims != null
+    && claims >= 0
+    && claims < FIN_SYS_MARKET_ACCESS_LOW_CLAIMS_PCT_GDP_MAX
+    && parents === 0;
+}
+
+// Upper bound on a plausible `parentCount`: the BIS CBS seeder counts parents
+// from an enumerated list (`PARENT_COUNTRIES` in `scripts/seed-bis-lbs.mjs`, 16
+// entries), so no country can legitimately report more. Used only when the
+// envelope does not carry `parentCountries` to derive the bound from.
+const FIN_SYS_BIS_REPORTING_PARENTS_MAX = 16;
+
+/**
+ * A `parentCount` the BIS seeder could actually have produced: it is
+ * `Object.values(parents).filter(...).length` over an enumerated list, so a
+ * legitimate value is a non-negative integer no larger than that list.
+ *
+ * The type, finiteness, integer, and range checks reject malformed or
+ * impossible values. `readBisLbsCountry` keeps the nullable result for the
+ * conditioning arithmetic, and separately records when a non-null raw field
+ * failed these checks so the blend can retain its design weight with a
+ * conservative fallback.
+ *
+ * An implausible value is therefore treated as absent for diversity evidence,
+ * but not as an ordinary missing slot when it was present in the payload.
+ * Genuine absence remains distinguishable and keeps the existing
+ * coverage-weighted absence semantics.
+ */
+function readPlausibleParentCount(rawParentCount: unknown, maxParents: number): number | null {
+  if (typeof rawParentCount !== 'number') return null;
+  const numeric = safeNum(rawParentCount);
+  if (numeric == null || !Number.isInteger(numeric) || numeric < 0 || numeric > maxParents) return null;
+  return numeric;
 }
 
 function readBisLbsCountry(raw: unknown, countryCode: string): BisLbsCountry | null {
@@ -2017,15 +2525,48 @@ function readBisLbsCountry(raw: unknown, countryCode: string): BisLbsCountry | n
   if (!countries || typeof countries !== 'object') return null;
   const entry = countries[countryCode];
   if (!entry || typeof entry !== 'object') return null;
+  const rawClaims = (entry as { totalXborderPctGdp?: unknown }).totalXborderPctGdp;
+  const rawParentCount = (entry as { parentCount?: unknown }).parentCount;
+
+  // Collection completeness is an envelope-level fact, not a per-country one:
+  // the seeder publishes `successfulParents` alongside the `parentCountries`
+  // list it attempted. Absent or malformed → assume complete, so a payload
+  // predating the fields is not retroactively marked degraded.
+  const rawParentCountries = (raw as { parentCountries?: unknown }).parentCountries;
+  const attemptedParents = Array.isArray(rawParentCountries) && rawParentCountries.length > 0
+    ? rawParentCountries.length
+    : FIN_SYS_BIS_REPORTING_PARENTS_MAX;
+  const rawSuccessfulParents = (raw as { successfulParents?: unknown }).successfulParents;
+  const parentSetComplete = typeof rawSuccessfulParents === 'number'
+    && Number.isFinite(rawSuccessfulParents)
+    ? rawSuccessfulParents >= attemptedParents
+    : true;
+
+  const totalXborderPctGdp = typeof rawClaims === 'number' && rawClaims >= 0
+    ? safeNum(rawClaims)
+    : null;
+  const parentCount = readPlausibleParentCount(rawParentCount, attemptedParents);
+
   return {
-    totalXborderPctGdp: safeNum((entry as { totalXborderPctGdp?: unknown }).totalXborderPctGdp),
-    parentCount: safeNum((entry as { parentCount?: unknown }).parentCount),
+    // `safeNum(null)` and `safeNum('')` are numeric zero by design. These
+    // fields use zero as a real financial-isolation signal, so require a raw
+    // number rather than manufacturing an observed zero from malformed data.
+    totalXborderPctGdp,
+    parentCount,
+    totalXborderPctGdpMalformed: rawClaims != null && totalXborderPctGdp == null,
+    parentCountMalformed: rawParentCount != null && parentCount == null,
+    parentSetComplete,
   };
 }
 
 type FatfStatus = 'black' | 'gray' | 'compliant';
 
-function readFatfStatus(raw: unknown, countryCode: string): FatfStatus | null {
+interface FatfObservation {
+  status: FatfStatus;
+  assignedByAbsence: boolean;
+}
+
+function readFatfStatus(raw: unknown, countryCode: string): FatfObservation | null {
   if (raw == null || typeof raw !== 'object') return null;
   const listings = (raw as { listings?: Record<string, unknown> }).listings;
   if (!listings || typeof listings !== 'object') return null;
@@ -2039,10 +2580,12 @@ function readFatfStatus(raw: unknown, countryCode: string): FatfStatus | null {
   // reaching production, but defense-in-depth costs nothing.
   if (Object.keys(listings).length === 0) return null;
   const status = listings[countryCode];
-  if (status === 'black' || status === 'gray' || status === 'compliant') return status;
+  if (status === 'black' || status === 'gray' || status === 'compliant') {
+    return { status, assignedByAbsence: false };
+  }
   // Unknown country = compliant (FATF only enumerates non-compliant
   // jurisdictions; absence from both lists means compliant).
-  return 'compliant';
+  return { status: 'compliant', assignedByAbsence: true };
 }
 
 // #6459: gray rescaled 30 → 55. FATF grey-listing means "increased
@@ -2053,14 +2596,14 @@ function readFatfStatus(raw: unknown, countryCode: string): FatfStatus | null {
 // to Iran and DPRK than to their actual peers. 55 keeps grey clearly
 // penalised while leaving black as the distinct, much worse state.
 //
-// `compliant` stays at 100 even though FATF assigns it by ABSENCE from both
-// lists rather than by assessment — a hole that gave Russia, Belarus, Cuba
-// and Libya a perfect 100 on a 0.20-weight component. That hole is closed by
-// `FIN_SYS_EXPOSURE_COMPREHENSIVE_EMBARGO` rather than by penalising the ~170
-// genuinely unlisted jurisdictions.
+// `compliant` stays at 100 for countries with other observed financial-system
+// components. #6461 drops it only when it was assigned by absence and is the
+// sole resolving component; listed gray/black jurisdictions remain real
+// observations, and the comprehensive-embargo cap remains authoritative for
+// its externally defined cohort.
 const FATF_GRAY_SCORE = 55;
 
-function fatfStatusToScore(status: FatfStatus): number {
+export function fatfStatusToScore(status: FatfStatus): number {
   switch (status) {
     case 'black': return 0;
     case 'gray': return FATF_GRAY_SCORE;
@@ -3128,10 +3671,26 @@ export const RESILIENCE_NOT_APPLICABLE_WHEN_ZERO_COVERAGE: ReadonlySet<Resilienc
 // `education` counted, the US happy-path build fell below the threshold and
 // dropped out of the headline ranking entirely.
 //
-// `financialSystemExposure` is deliberately NOT in this set even though it is
-// also dark. Adding it would change the coverage number already published for
-// every country, which is outside this change's scope; the two should be
-// reconciled together when either flag flips.
+// RECONCILIATION, updated 2026-08-13 for the finance activation (#6511). The
+// prior note here said the two dark dimensions "should be reconciled together
+// when either flag flips". Education flipped on 2026-08-11 and
+// `financialSystemExposure` is now live in production through its owner-set
+// environment flag. Keep finance OUT of this exclusion set:
+//
+//   - Adding it would change `overallCoverage` for every country, and
+//     `headlineEligible` gates public ranking inclusion on `>= 0.65`. That is a
+//     published-number change for all 196 countries and needs its own
+//     measurement and its own cache-generation reasoning — it cannot ride along
+//     with a different dimension's activation.
+//   - #6459's retuned construct has now completed its separate activation phase;
+//     active observations and source failures must remain visible in confidence
+//     and headline eligibility. The code default remains false for CI and for
+//     the explicit production rollback path, but production runs with the
+//     owner-controlled flag on.
+//
+// Education remains in this set after activation for its explicit false
+// rollback. The triple-zero discriminator below means active observations and
+// source failures automatically rejoin the confidence and pillar means.
 export const RESILIENCE_FLAG_DARK_WHEN_ZERO_COVERAGE: ReadonlySet<ResilienceDimensionId> = new Set([
   'education',
 ]);
@@ -3225,6 +3784,9 @@ export async function scoreAllDimensions(
   reader: ResilienceSeedReader = defaultSeedReader,
 ): Promise<Record<ResilienceDimensionId, ResilienceDimensionScore>> {
   const memoizedReader = createMemoizedSeedReader(reader);
+  const statcanUsed = countryCode === 'CA'
+    ? statcanOverlayUsed(await memoizedReader(RESILIENCE_STATCAN_WDS_KEY))
+    : undefined;
   const [entries, freshnessMap, failedDatasets, standaloneFailures] = await Promise.all([
     Promise.all(
       RESILIENCE_DIMENSION_ORDER.map(async (dimensionId) => {
@@ -3270,7 +3832,7 @@ export async function scoreAllDimensions(
     // with the scorer keys in practice, the shared reader is cheap).
     readFreshnessMap(memoizedReader),
     readFailedDatasets(memoizedReader),
-    readStandaloneSourceFailureDimensions(memoizedReader),
+    readStandaloneSourceFailureDimensions(memoizedReader, undefined, countryCode, statcanUsed),
   ]);
   const scores = Object.fromEntries(entries) as Record<ResilienceDimensionId, ResilienceDimensionScore>;
 
@@ -3278,10 +3840,12 @@ export async function scoreAllDimensions(
   // derived from the aggregated seed-meta map. Runs before the T1.7
   // source-failure pass because source-failure only touches
   // imputationClass and does not interact with freshness.
+  // CA inflation/unemployment that consumed StatCan must stamp StatCan
+  // seed-meta, not the IMF registry key the overlay replaced.
   for (const dimensionId of RESILIENCE_DIMENSION_ORDER) {
     scores[dimensionId] = {
       ...scores[dimensionId],
-      freshness: classifyDimensionFreshness(dimensionId, freshnessMap),
+      freshness: classifyDimensionFreshness(dimensionId, freshnessMap, undefined, countryCode, statcanUsed),
     };
   }
 
@@ -3293,7 +3857,7 @@ export async function scoreAllDimensions(
   // source-failure. Real-data and not-applicable dimensions are untouched:
   // a seed failing does not invalidate a country that was served from prior
   // snapshot data or a structural non-applicability path.
-  const affected = failedDimensionsFromDatasets(failedDatasets);
+  const affected = failedDimensionsFromDatasets(failedDatasets, countryCode);
   for (const dimId of standaloneFailures.dimensions) {
     affected.add(dimId);
   }

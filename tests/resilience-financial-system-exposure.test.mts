@@ -34,22 +34,111 @@ import {
   FIN_SYS_EXPOSURE_COMPREHENSIVE_EMBARGO,
   FIN_SYS_EXPOSURE_EMBARGO_POLICY_MAX_AGE_DAYS,
   FIN_SYS_EXPOSURE_EMBARGO_POLICY_REVIEWED_ON,
-  FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP,
+  FIN_SYS_MARKET_ACCESS_LOW_CLAIMS_PCT_GDP_MAX,
+  FIN_SYS_MARKET_ACCESS_LOW_DEBT_PCT_GNI_MAX,
+  FIN_SYS_BAND_WEIGHT,
+  FIN_SYS_DEBT_BEST_PCT_GNI,
+  FIN_SYS_DEBT_WORST_PCT_GNI,
+  FIN_SYS_FATF_WEIGHT,
+  FIN_SYS_REDUNDANCY_BEST_PARENTS,
+  FIN_SYS_REDUNDANCY_WEIGHT,
+  FIN_SYS_REDUNDANCY_WORST_PARENTS,
+  FIN_SYS_SHORT_TERM_DEBT_WEIGHT,
+  fatfStatusToScore,
   normalizeBandLowerBetter,
+  normalizeDiversityConditionedBand,
+  normalizeHigherBetter,
+  normalizeLowerBetter,
+  roundScore,
   scoreFinancialSystemExposure,
   ResilienceConfigurationError,
   type ResilienceSeedReader,
 } from '../server/worldmonitor/resilience/v1/_dimension-scorers.ts';
-import { FINSYS_FIXTURE_CAPTURED_AT, createFinSysFixtureReader } from './helpers/resilience-finsys-fixtures.mts';
+import {
+  FINSYS_BIS_FIXTURE,
+  FINSYS_DEBT_FIXTURE,
+  FINSYS_FIXTURE_CAPTURED_AT,
+  FINSYS_NON_DRS_COUNTRY_CODES,
+  createFinSysFixtureReader,
+} from './helpers/resilience-finsys-fixtures.mts';
 
 const TEST_ISO2 = 'XX';
-const VALID_DEBT_CONTROL_COUNTRY = 'ZZ';
 
-function reachableDebtEnvelope(nonDrsCountryCodes: ReadonlyArray<string> = []): unknown {
+/**
+ * Albania's blend on a given band score, mirroring the production blend. The
+ * optional preFixRenormalization mode preserves the old drop-and-renormalise
+ * arithmetic for the inherited-baseline counterfactual only.
+ */
+function blendFinSys(
+  band: number | null,
+  parentCount: number | null,
+  options: { preFixRenormalization?: boolean } = {},
+): number {
+  // Every leg goes through the PRODUCTION transform at the PRODUCTION weight,
+  // imported rather than restated. The earlier version hand-rolled the debt
+  // normalization as `100 - value / 15 * 100` and the redundancy leg as
+  // `(parentCount - 1) / 9 * 100`, both unrounded — but production rounds each
+  // leg via `roundScore` before dividing by the surviving weight. Albania's debt
+  // leg is 73, not 72.8667, and that single point put the honest raw-band blend
+  // at 74.47 -> 74 where production lands on exactly 74.50 -> 75, which is how
+  // the inherited inflation came to be published as +12 when it is +11.
+  //
+  // Calling the real transforms is what makes that class of drift
+  // unrepresentable, rather than merely asserted against: there is no longer a
+  // second copy of the arithmetic to diverge. A guard proved insufficient here —
+  // reverting the rounding alone left the suite green, because Albania's
+  // CONDITIONED figures do not straddle a rounding boundary even though its
+  // raw-band figures do.
+  const debtNorm = normalizeLowerBetter(
+    FINSYS_DEBT_FIXTURE.AL.value,
+    FIN_SYS_DEBT_BEST_PCT_GNI,
+    FIN_SYS_DEBT_WORST_PCT_GNI,
+  );
+  const slots: Array<[number | null, number]> = [
+    [debtNorm, FIN_SYS_SHORT_TERM_DEBT_WEIGHT],
+    [band, FIN_SYS_BAND_WEIGHT],
+    [fatfStatusToScore('compliant'), FIN_SYS_FATF_WEIGHT],
+    [
+      parentCount == null
+        ? null
+        : normalizeHigherBetter(parentCount, FIN_SYS_REDUNDANCY_WORST_PARENTS, FIN_SYS_REDUNDANCY_BEST_PARENTS),
+      FIN_SYS_REDUNDANCY_WEIGHT,
+    ],
+  ];
+  let num = 0;
+  let den = 0;
+  const totalWeight = slots.reduce((sum, [, weight]) => sum + weight, 0);
+  for (const [score, weight] of slots) {
+    if (score == null) continue;
+    num += score * weight;
+    den += weight;
+  }
+  return Math.round(num / (options.preFixRenormalization ? den : totalWeight));
+}
+const VALID_DEBT_CONTROL_COUNTRY = 'ZZ';
+const VALID_DEBT_SCHEMA_VERSION = 2;
+
+function reachableDebtEnvelope(additionalNonDrsCountryCodes: ReadonlyArray<string> = []): unknown {
   return {
-    countries: { [VALID_DEBT_CONTROL_COUNTRY]: { value: 1, year: 2024 } },
-    nonDrsCountryCodes,
+    _seed: {
+      fetchedAt: Date.now(),
+      recordCount: 1,
+      sourceVersion: 'wb-ids-test',
+      schemaVersion: VALID_DEBT_SCHEMA_VERSION,
+      state: 'OK',
+    },
+    data: {
+      countries: { [VALID_DEBT_CONTROL_COUNTRY]: { value: 1, year: 2024 } },
+      nonDrsCountryCodes: [...new Set([...FINSYS_NON_DRS_COUNTRY_CODES, ...additionalNonDrsCountryCodes])],
+    },
   };
+}
+
+function readerWithDebtPayload(debtPayload: unknown): ResilienceSeedReader {
+  const fixtureReader = createFinSysFixtureReader();
+  return async (key) => (
+    key === 'economic:wb-external-debt:v1' ? debtPayload : fixtureReader(key)
+  );
 }
 
 // The dim is flag-gated for staged rollout (matches energy v2 pattern).
@@ -221,26 +310,34 @@ describe('scoreFinancialSystemExposure — fail-closed preflight', () => {
   });
 
   it('throws when healthy seed-meta is followed by an absent or malformed WB data envelope', async () => {
+    const validNonDrsCountryCodes = [...FINSYS_NON_DRS_COUNTRY_CODES];
+    const malformedNonDrsCountryCodes = [...validNonDrsCountryCodes];
+    malformedNonDrsCountryCodes[0] = 'bad';
+    const duplicateNonDrsCountryCodes = [...validNonDrsCountryCodes];
+    duplicateNonDrsCountryCodes[0] = duplicateNonDrsCountryCodes[1];
     for (const debtPayload of [
       null,
       {},
-      { countries: {} },
-      { countries: [], nonDrsCountryCodes: [] },
-      { countries: { ZZ: { value: 1 } }, nonDrsCountryCodes: ['LU', 'LU'] },
+      { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: {} },
+      { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: [], nonDrsCountryCodes: [] },
+      {
+        schemaVersion: VALID_DEBT_SCHEMA_VERSION,
+        countries: { [VALID_DEBT_CONTROL_COUNTRY]: { value: 1, year: 2024 } },
+        nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES.slice(0, 39),
+      },
+      {
+        schemaVersion: VALID_DEBT_SCHEMA_VERSION,
+        countries: { ZZ: { value: 1 } },
+        nonDrsCountryCodes: malformedNonDrsCountryCodes,
+      },
+      {
+        schemaVersion: VALID_DEBT_SCHEMA_VERSION,
+        countries: { ZZ: { value: 1 } },
+        nonDrsCountryCodes: duplicateNonDrsCountryCodes,
+      },
     ]) {
-      const reader: ResilienceSeedReader = async (key) => {
-        if (key.startsWith('seed-meta:')) return { fetchedAt: Date.now(), status: 'ok' };
-        if (key === 'economic:wb-external-debt:v1') return debtPayload;
-        if (key === 'economic:bis-lbs:v1') {
-          return { countries: { [TEST_ISO2]: { totalXborderPctGdp: 25, parentCount: 10 } } };
-        }
-        if (key === 'economic:fatf-listing:v1') {
-          return { listings: { IR: 'black', KP: 'black' }, publicationDate: '2026-06-01' };
-        }
-        return null;
-      };
       await assert.rejects(
-        () => scoreFinancialSystemExposure(TEST_ISO2, reader),
+        () => scoreFinancialSystemExposure(TEST_ISO2, readerWithDebtPayload(debtPayload)),
         (err: unknown) => (
           err instanceof ResilienceConfigurationError
           && err.missingKeys.includes('economic:wb-external-debt:v1')
@@ -248,6 +345,47 @@ describe('scoreFinancialSystemExposure — fail-closed preflight', () => {
         'source-level WB data failure must not become a positive per-country imputation',
       );
     }
+  });
+
+  it('throws when the WB payload regresses to schema v1 without non-DRS metadata', async () => {
+    const reader = readerWithDebtPayload({
+      countries: { [VALID_DEBT_CONTROL_COUNTRY]: { value: 1, year: 2024 } },
+    });
+
+    await assert.rejects(
+      () => scoreFinancialSystemExposure(TEST_ISO2, reader),
+      (err: unknown) => (
+        err instanceof ResilienceConfigurationError
+        && err.missingKeys.includes('economic:wb-external-debt:v1')
+        && /schema v2.*nonDrsCountryCodes/.test(err.message)
+      ),
+      'the active non-DRS path must fail closed when production falls back to schema v1',
+    );
+  });
+
+  it('throws when an otherwise valid-looking WB payload declares schema v1', async () => {
+    const reader = readerWithDebtPayload({
+      _seed: {
+        fetchedAt: Date.now(),
+        recordCount: 1,
+        sourceVersion: 'wb-ids-test',
+        schemaVersion: 1,
+        state: 'OK',
+      },
+      data: {
+        countries: { [VALID_DEBT_CONTROL_COUNTRY]: { value: 1, year: 2024 } },
+        nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES,
+      },
+    });
+
+    await assert.rejects(
+      () => scoreFinancialSystemExposure(TEST_ISO2, reader),
+      (err: unknown) => (
+        err instanceof ResilienceConfigurationError
+        && err.missingKeys.includes('economic:wb-external-debt:v1')
+      ),
+      'the scorer must enforce the numeric schema boundary before using the unwrapped payload',
+    );
   });
 });
 
@@ -277,7 +415,9 @@ describe('scoreFinancialSystemExposure — formula math', () => {
       if (key === 'seed-meta:economic:wb-external-debt') return { fetchedAt: Date.now() };
       if (key === 'seed-meta:economic:bis-lbs') return { fetchedAt: Date.now() };
       if (key === 'seed-meta:economic:fatf-listing') return { fetchedAt: Date.now() };
-      if (key === 'economic:wb-external-debt:v1') return { countries: { [TEST_ISO2]: { value: 0, year: 2024 } } };
+      if (key === 'economic:wb-external-debt:v1') {
+        return { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: { [TEST_ISO2]: { value: 0, year: 2024 } }, nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES };
+      }
       if (key === 'economic:bis-lbs:v1') return { countries: { [TEST_ISO2]: { totalXborderPctGdp: 25, parentCount: 10 } } };
       if (key === 'economic:fatf-listing:v1') return { listings: { [TEST_ISO2]: 'compliant' }, publicationDate: '2026-02-13' };
       return null;
@@ -291,7 +431,9 @@ describe('scoreFinancialSystemExposure — formula math', () => {
     if (key === 'seed-meta:economic:wb-external-debt') return { fetchedAt: Date.now() };
     if (key === 'seed-meta:economic:bis-lbs') return { fetchedAt: Date.now() };
     if (key === 'seed-meta:economic:fatf-listing') return { fetchedAt: Date.now() };
-    if (key === 'economic:wb-external-debt:v1') return { countries: { [TEST_ISO2]: { value: 15, year: 2024 } } };
+    if (key === 'economic:wb-external-debt:v1') {
+      return { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: { [TEST_ISO2]: { value: 15, year: 2024 } }, nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES };
+    }
     if (key === 'economic:bis-lbs:v1') return { countries: { [TEST_ISO2]: { totalXborderPctGdp: xborderPct, parentCount: 1 } } };
     if (key === 'economic:fatf-listing:v1') return { listings: { [TEST_ISO2]: 'black' }, publicationDate: '2026-02-13' };
     return null;
@@ -458,6 +600,431 @@ describe('scoreFinancialSystemExposure — formula math', () => {
     }
   });
 
+  it('diversity conditioning: the premium above 75 is earned in proportion to parent breadth', () => {
+    // The Albania defect: 17.6% of GDP through TWO parents took the raw
+    // band's 91 — a "healthy diversified" premium with no diversity
+    // evidence — while the construct's own redundancy component scored the
+    // same fact 11/100. Tested against the exported function directly, for
+    // the same reason as the U-shape invariants above: through the blend a
+    // fixture that varies the band also moves the debt slot.
+
+    // Invariant 1: everything at or below the 75 boundary is untouched at
+    // EVERY parent count — both floors and the deep over-exposure legs are
+    // not this conditioning's business.
+    let belowBoundarySamples = 0;
+    for (const pct of [0, 1.45, 4.9, 43.67, 60, 80, 122, 1041.64]) {
+      const raw = normalizeBandLowerBetter(pct);
+      if (raw > 75) continue;
+      belowBoundarySamples++;
+      for (const parents of [null, 0, 1, 2, 5, 10, 14]) {
+        assert.equal(
+          normalizeDiversityConditionedBand(pct, parents),
+          raw,
+          `${pct}% (raw ${raw} ≤ 75) must be unchanged at parents=${parents}`,
+        );
+      }
+    }
+    // The `continue` above skips samples the band moved above 75. If a future
+    // retune lifted ALL of them, this invariant would pass while asserting
+    // nothing — the exact vacuity the #6459 lesson was about.
+    assert.ok(
+      belowBoundarySamples >= 4,
+      `only ${belowBoundarySamples} sampled readings landed at or below the boundary — `
+        + 're-anchor the sample set, this invariant is going vacuous',
+    );
+
+    // Invariant 2: full breadth (parents ≥ 10, the redundancy transform's
+    // best goalpost) earns the full raw premium everywhere.
+    for (const pct of [5, 10, 17.6, 25, 31.62, 40]) {
+      assert.equal(
+        normalizeDiversityConditionedBand(pct, 10),
+        normalizeBandLowerBetter(pct),
+        `${pct}% at 10 parents must equal the raw band`,
+      );
+    }
+
+    // Invariant 3: one parent or none — or a BIS row whose count failed to
+    // parse (null) — earns NO premium: the band caps at the 75 boundary.
+    // Absence of diversity evidence is not diversity.
+    for (const parents of [null, 0, 1]) {
+      for (const pct of [10, 17.6, 25, 31.62]) {
+        assert.equal(
+          normalizeDiversityConditionedBand(pct, parents),
+          75,
+          `${pct}% at parents=${parents} must cap at the 75 boundary`,
+        );
+      }
+    }
+
+    // Invariant 4: monotone in parents — more breadth never lowers the band.
+    for (const pct of [10, 17.6, 25]) {
+      let prev = -1;
+      for (let parents = 0; parents <= 14; parents++) {
+        const observed = normalizeDiversityConditionedBand(pct, parents);
+        assert.ok(
+          observed >= prev,
+          `${pct}% must be monotone in parents (parents=${parents}: ${observed} < ${prev})`,
+        );
+        prev = observed;
+      }
+    }
+
+    // Invariant 5: continuity in claims survives the conditioning — the #6459
+    // P1 cliff must not be reintroduced by the premium scaling.
+    //
+    // The named anchors sit at the ROUNDED band's real 75-crossings, 5.4%
+    // rising and 40.59% falling. The unrounded 5%/40.9% figures are the wrong
+    // probe points: the rounded band takes the SAME value on both sides of each
+    // of them, so a ±0.05 probe there compares a value to itself and cannot
+    // fail whatever the transform does. The parent count matters for the same
+    // reason — at parents ≤ 5 the premium is compressed hard enough that both
+    // samples still round together, so the probe only becomes discriminating
+    // once the premium term is live. `assert.notEqual` pins that: if a future
+    // retune flattens the crossing, this anchor fails loudly instead of
+    // quietly reverting to a self-comparison.
+    for (const boundary of [5.4, 40.59]) {
+      const below = normalizeDiversityConditionedBand(boundary - 0.05, 10);
+      const above = normalizeDiversityConditionedBand(boundary + 0.05, 10);
+      assert.ok(
+        Math.abs(above - below) <= 1,
+        `discontinuity at the ${boundary}% crossing (${below} → ${above})`,
+      );
+      assert.notEqual(
+        below,
+        above,
+        `the ${boundary}% anchor went flat (${below} on both sides) — it can no longer `
+          + 'detect a cliff; re-derive the crossing from the rounded band',
+      );
+    }
+    // The 25% peak is genuinely flat on both sides at every parent count (it is
+    // a maximum, not a crossing), so it is asserted as flat rather than as a
+    // discriminating probe.
+    for (const parents of [2, 5, 10]) {
+      assert.equal(
+        normalizeDiversityConditionedBand(25 - 0.05, parents),
+        normalizeDiversityConditionedBand(25 + 0.05, parents),
+        `parents=${parents}: the 25% peak must be flat, not a step`,
+      );
+    }
+
+    // Dense sweep, with a bound per region instead of one loose bound for all
+    // of them. The isolation leg legitimately climbs 9 points per 1% of GDP, so
+    // at 0.25% sampling it steps up to 3 — a uniform `<= 3` therefore constrains
+    // nothing in the premium region, where the true maximum is 1. Sweeping past
+    // 80% also carries it over the over-exposure floor knee, which the previous
+    // 70% ceiling never reached.
+    for (const parents of [null, 0, 1, 2, 5, 9, 10, 16]) {
+      let prev = normalizeDiversityConditionedBand(0, parents);
+      let maxStep = 0;
+      for (let pct = 0.25; pct <= 130; pct += 0.25) {
+        const observed = normalizeDiversityConditionedBand(pct, parents);
+        const step = Math.abs(observed - prev);
+        maxStep = Math.max(maxStep, step);
+        const bound = pct <= 5 ? 3 : 1;
+        assert.ok(
+          step <= bound,
+          `parents=${parents}: ${(observed - prev > 0 ? '+' : '')}${observed - prev}-point cliff `
+            + `between ${(pct - 0.25).toFixed(2)}% and ${pct.toFixed(2)}% (${prev} → ${observed}), `
+            + `bound ${bound}`,
+        );
+        prev = observed;
+      }
+      // Non-vacuity: a transform that returned a constant would sail through
+      // the step bound above.
+      assert.ok(maxStep > 0, `parents=${parents}: the band never moved across the sweep`);
+    }
+
+    // The concrete production anchor: Albania's exact reading. Raw band 91;
+    // at 2 parents the premium scales by 11% → 77.
+    assert.equal(normalizeBandLowerBetter(17.6), 91);
+    assert.equal(normalizeDiversityConditionedBand(17.6, 2), 77);
+  });
+
+  it('a non-finite parent count neutralises the premium instead of falling through NaN', () => {
+    // `normalizeHigherBetter` returns NaN for a non-finite count and
+    // `roundScore(NaN)` is 0 — which would drop a premium-region country
+    // BELOW the isolation floor (30) and re-invert the exact ranking this
+    // function exists to fix. The sibling band neutralises malformed input
+    // the same way rather than inventing a floor.
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const observed = normalizeDiversityConditionedBand(17.6, bad);
+      assert.equal(
+        observed,
+        75,
+        `parentCount ${String(bad)} must cap at the premium floor, not fall through to ${observed}`,
+      );
+      assert.ok(
+        observed > FIN_SYS_BAND_ISOLATION_FLOOR,
+        `parentCount ${String(bad)} must never score below the isolation floor`,
+      );
+    }
+  });
+});
+
+describe('scoreFinancialSystemExposure — the blend consumes the CONDITIONED band', () => {
+  it('pins a country where conditioning moves the published score', async () => {
+    // Wiring guard. The unit invariants above test the transform in
+    // isolation, and the matched pairs catch a revert to the raw band — but
+    // only via Albania, whose two readings round to the same 70 under some
+    // mutations. Pin a country whose rounded dimension score DIFFERS between
+    // the raw and conditioned bands, so the call site is pinned in both
+    // directions rather than only against full reversion.
+    //
+    // US: claims 31.62% of GDP through 8 parents. Raw band 90; conditioned
+    // 75 + 15 x 0.78 = 87. That 3-point band difference survives the blend.
+    const reader = createFinSysFixtureReader();
+    const us = await scoreFinancialSystemExposure('US', reader);
+
+    assert.equal(normalizeBandLowerBetter(31.62), 90, 'raw band anchor');
+    assert.equal(normalizeDiversityConditionedBand(31.62, 8), 87, 'conditioned band anchor');
+    assert.equal(
+      us.score,
+      84,
+      'the US dimension score must reflect the conditioned band (87), not the raw band (90)',
+    );
+  });
+});
+
+describe('scoreFinancialSystemExposure — the band slot reports its own certainty', () => {
+  // Every other invariant in this file asserts on `.score`. These assert on
+  // `.coverage`, which is the field that says whether the published band was a
+  // redundancy-scaled READING or a floor substituted for absent evidence.
+  const AL_CLAIMS = FINSYS_BIS_FIXTURE.AL.totalXborderPctGdp;
+
+  it('withholding the premium for an absent parentCount reduces coverage, not just the score', async () => {
+    const honest = await scoreFinancialSystemExposure('AL', createFinSysFixtureReader());
+    const breadthAbsent = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({
+        bis: { AL: { totalXborderPctGdp: AL_CLAIMS, parentCount: null as unknown as number } },
+      }),
+    );
+
+    // The band leg is still scored (the level resolved), so this is NOT the
+    // slot dropping out — it is the slot resolving half-observed.
+    assert.ok(
+      breadthAbsent.coverage < honest.coverage,
+      `absent breadth must lower coverage (honest ${honest.coverage}, absent ${breadthAbsent.coverage})`,
+    );
+    // Non-vacuity: the drop must exceed what Component 4 alone (0.15) explains,
+    // otherwise this passes on the pre-existing sibling drop and says nothing
+    // about the band slot's own certainty.
+    const componentFourOnly = honest.coverage - 0.15;
+    assert.ok(
+      breadthAbsent.coverage < componentFourOnly,
+      `coverage ${breadthAbsent.coverage} must fall below ${componentFourOnly.toFixed(2)} — the `
+        + 'band slot has to report its own reduced certainty, not merely inherit Component 4 dropping',
+    );
+  });
+
+  it('an OBSERVED parentCount of 0 is distinguished from a malformed one', async () => {
+    // 0 means "no parent clears the 1%-of-GDP threshold" — an observation, not
+    // an absence. Both withhold the whole premium, so the BAND leg is identical:
+    assert.equal(normalizeDiversityConditionedBand(AL_CLAIMS, 0), 75);
+    assert.equal(normalizeDiversityConditionedBand(AL_CLAIMS, null), 75);
+
+    const observedZero = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({ bis: { AL: { totalXborderPctGdp: AL_CLAIMS, parentCount: 0 } } }),
+    );
+    const malformedBreadth = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({
+        bis: { AL: { totalXborderPctGdp: AL_CLAIMS, parentCount: String(FINSYS_BIS_FIXTURE.AL.parentCount) as unknown as number } },
+      }),
+    );
+
+    assert.ok(
+      observedZero.coverage > malformedBreadth.coverage,
+      `an observed 0 must report higher coverage than a malformed count `
+        + `(observed ${observedZero.coverage}, malformed ${malformedBreadth.coverage})`,
+    );
+
+    // A malformed count must not score higher than an observed zero. The failed
+    // slot retains its design weight in the fixed blend and contributes no
+    // score, while the observed zero contributes an explicit zero at that same
+    // weight. This is the #6528 contract at the real scorer seam.
+    assert.ok(
+      malformedBreadth.score <= observedZero.score,
+      'a malformed count must not outrank an observed zero '
+        + `(malformed ${malformedBreadth.score}, observed-zero ${observedZero.score})`,
+    );
+  });
+
+  it('an implausible parentCount reads as absent instead of as demonstrated breadth', async () => {
+    // A payload carrying an out-of-range or fractional count used to clamp to
+    // redundancy 100 and earn BOTH the full premium (0.30) and a perfect
+    // Component 4 (0.15) — 0.45 of the dimension bought by a corrupt field.
+    const honest = await scoreFinancialSystemExposure('AL', createFinSysFixtureReader());
+    const malformedBreadth = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({
+        bis: { AL: { totalXborderPctGdp: AL_CLAIMS, parentCount: String(FINSYS_BIS_FIXTURE.AL.parentCount) as unknown as number } },
+      }),
+    );
+    // What a TRUSTED implausible count would have scored: an out-of-range count
+    // clamps the redundancy scale to its best goalpost, so the band takes its
+    // full raw premium AND Component 4 reads 100. This is the pre-fix behaviour,
+    // kept as the thing the fix has to beat.
+    const trustedBogus = blendFinSys(
+      normalizeBandLowerBetter(AL_CLAIMS),
+      FIN_SYS_REDUNDANCY_BEST_PARENTS,
+    );
+
+    for (const bogus of [500, -3, 2.5]) {
+      const corrupt = await scoreFinancialSystemExposure(
+        'AL',
+        createFinSysFixtureReader({
+          bis: { AL: { totalXborderPctGdp: AL_CLAIMS, parentCount: bogus } },
+        }),
+      );
+      assert.equal(
+        corrupt.score,
+        malformedBreadth.score,
+        `parentCount=${bogus} must score exactly like an absent count`,
+      );
+      assert.ok(
+        corrupt.score < trustedBogus,
+        `parentCount=${bogus} must score below the ${trustedBogus} a trusted bogus count would `
+          + `have earned (got ${corrupt.score})`,
+      );
+      assert.ok(
+        corrupt.coverage < honest.coverage,
+        `parentCount=${bogus} must lower coverage (${corrupt.coverage} vs ${honest.coverage})`,
+      );
+    }
+
+    // A corrupt count must not raise the honest dimension score. The fixed
+    // blend keeps the missing slot in the denominator with a zero contribution,
+    // so the data-quality regression cannot buy resilience.
+    assert.ok(
+      malformedBreadth.score <= honest.score,
+      `corrupt parentCount must not raise the honest score (honest ${honest.score}, corrupt ${malformedBreadth.score})`,
+    );
+  });
+
+  it('an incomplete BIS reporting-parent set lowers certainty on both BIS slots', async () => {
+    // seed-bis-lbs tolerates 12 of 16 parent fetches; a missing feed silently
+    // undercounts parentCount for every country. That now moves the 0.30 band
+    // slot as well as the 0.15 redundancy slot, so it must surface as reduced
+    // certainty rather than passing as an observation.
+    const complete = await scoreFinancialSystemExposure('AL', createFinSysFixtureReader());
+    const degraded = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({ bisEnvelope: { successfulParents: 12, parentCountries: 16 } }),
+    );
+    assert.equal(degraded.score, complete.score, 'certainty is a coverage signal, not a score change');
+    assert.ok(
+      degraded.coverage < complete.coverage,
+      `a degraded parent set must lower coverage (complete ${complete.coverage}, degraded ${degraded.coverage})`,
+    );
+  });
+});
+
+describe('scoreFinancialSystemExposure — half-parsed BIS row', () => {
+  it('does not let a malformed claims field raise the published score', async () => {
+    const real = FINSYS_BIS_FIXTURE.AL;
+    const honest = await scoreFinancialSystemExposure('AL', createFinSysFixtureReader());
+    const malformedClaims = [
+      ['string', String(real.totalXborderPctGdp) as unknown as number],
+      ['negative', -1],
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+    ] as const;
+
+    for (const [label, totalXborderPctGdp] of malformedClaims) {
+      const result = await scoreFinancialSystemExposure(
+        'AL',
+        createFinSysFixtureReader({ bis: { AL: { ...real, totalXborderPctGdp } } }),
+      );
+
+      // A present-but-invalid claims field is a retained zero at the 0.30
+      // band weight. The mirror uses a null band to model the parser result
+      // and keeps the fixed denominator, so this checks reader-to-blend wiring
+      // rather than only checking that the score moves in the safe direction.
+      assert.equal(
+        blendFinSys(null, real.parentCount),
+        result.score,
+        `${label} claims must retain the band weight as a zero fallback`,
+      );
+      assert.ok(
+        result.score <= honest.score,
+        `${label} claims must not raise the honest score (honest ${honest.score}, corrupt ${result.score})`,
+      );
+      assert.ok(
+        result.coverage < honest.coverage,
+        `${label} claims must lower coverage (honest ${honest.coverage}, corrupt ${result.coverage})`,
+      );
+    }
+  });
+
+  it('does not let a malformed parentCount raise the published score', async () => {
+    // A `parentCount` that fails to parse nulls the Component 4 slot. Before
+    // #6528, `weightedBlend` renormalised the freed 0.15 onto the survivors and
+    // Albania rose from 70 to 80. `readBisLbsCountry` requires a raw number, so
+    // a seeder publishing the count as a string is exactly this corruption.
+    //
+    // This is a property of the blend and PREDATES the diversity conditioning
+    // — against the raw band the same measurement is 74 -> 86. The reader now
+    // distinguishes this malformed field from a genuinely absent one, and the
+    // blend retains its weight with a conservative fallback. The conditioning
+    // arithmetic and coverage signal must remain unchanged.
+    const real = FINSYS_BIS_FIXTURE.AL;
+    const honest = await scoreFinancialSystemExposure('AL', createFinSysFixtureReader());
+    const halfParsed = await scoreFinancialSystemExposure(
+      'AL',
+      createFinSysFixtureReader({
+        bis: { AL: { ...real, parentCount: String(real.parentCount) as unknown as number } },
+      }),
+    );
+
+    const conditionedInflation = halfParsed.score - honest.score;
+
+    // MIRROR FIDELITY. Feed the mirror the CONDITIONED band (the leg the live
+    // scorer actually consumes) and it must land on the real scorer's number,
+    // in both the honest and malformed states. If the weights, the debt
+    // transform, or the missing-slot policy drift apart, this fails instead of
+    // the baseline quietly going wrong.
+    assert.equal(
+      blendFinSys(normalizeDiversityConditionedBand(real.totalXborderPctGdp, real.parentCount), real.parentCount),
+      honest.score,
+      'blendFinSys no longer reproduces the real scorer on the honest payload',
+    );
+    assert.equal(
+      blendFinSys(normalizeDiversityConditionedBand(real.totalXborderPctGdp, null), null),
+      halfParsed.score,
+      'blendFinSys no longer reproduces the real scorer on the half-parsed payload',
+    );
+
+    // The same country, same corruption, scored on the UNCONDITIONED band with
+    // the pre-fix arithmetic — the inflation this construct inherited rather
+    // than introduced.
+    const rawHonest = blendFinSys(
+      normalizeBandLowerBetter(real.totalXborderPctGdp),
+      real.parentCount,
+      { preFixRenormalization: true },
+    );
+    const rawHalfParsed = blendFinSys(
+      normalizeBandLowerBetter(real.totalXborderPctGdp),
+      null,
+      { preFixRenormalization: true },
+    );
+    const inheritedInflation = rawHalfParsed - rawHonest;
+
+    assert.ok(
+      conditionedInflation <= 0,
+      `the real blend must not inflate on a half-parsed row (honest ${honest.score}, half-parsed ${halfParsed.score})`,
+    );
+    // Guard integrity: the old counterfactual must still demonstrate the
+    // defect this regression test protects against. If this turns non-positive
+    // the fixture or its pre-fix mirror was neutered.
+    assert.ok(
+      inheritedInflation > 0,
+      'pre-fix mirror integrity: the unconditioned baseline stopped inflating, '
+        + 'so the fixture or counterfactual no longer models the old path',
+    );
+  });
+
   it('FATF empty listings dict (parser regression) does NOT default every country to compliant', async () => {
     // Greptile P2 regression guard (PR #3407 review). A malformed seed
     // with `listings: {}` that bypassed validate would otherwise score
@@ -511,7 +1078,9 @@ describe('scoreFinancialSystemExposure — formula math', () => {
 describe('scoreFinancialSystemExposure — comprehensive-embargo cap (#6459)', () => {
   const bestCaseReader = (iso2: string): ResilienceSeedReader => async (key) => {
     if (key.startsWith('seed-meta:')) return { status: 'ok', fetchedAt: Date.now() };
-    if (key === 'economic:wb-external-debt:v1') return { countries: { [iso2]: { value: 0, year: 2024 } } };
+    if (key === 'economic:wb-external-debt:v1') {
+      return { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: { [iso2]: { value: 0, year: 2024 } }, nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES };
+    }
     if (key === 'economic:bis-lbs:v1') return { countries: { [iso2]: { totalXborderPctGdp: 25, parentCount: 10 } } };
     if (key === 'economic:fatf-listing:v1') {
       return { listings: { IR: 'black', KP: 'black' }, publicationDate: '2026-06-01' };
@@ -525,10 +1094,7 @@ describe('scoreFinancialSystemExposure — comprehensive-embargo cap (#6459)', (
     // wrong: an embargoed country whose four slots all anchor at 100.
     for (const iso2 of FIN_SYS_EXPOSURE_COMPREHENSIVE_EMBARGO) {
       const result = await scoreFinancialSystemExposure(iso2, bestCaseReader(iso2));
-      assert.ok(
-        result.score <= FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP,
-        `${iso2} scored ${result.score}; must be capped at ${FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP}`,
-      );
+      assert.equal(result.score, 15, `${iso2} must stay pinned to the audited embargo cap`);
     }
   });
 
@@ -586,10 +1152,7 @@ describe('scoreFinancialSystemExposure — comprehensive-embargo cap (#6459)', (
 
   it('is case-insensitive on the country code', async () => {
     const lower = await scoreFinancialSystemExposure('ru', bestCaseReader('ru'));
-    assert.ok(
-      lower.score <= FIN_SYS_EXPOSURE_EMBARGO_SCORE_CAP,
-      `lowercase iso2 must still hit the cap, got ${lower.score}`,
-    );
+    assert.equal(lower.score, 15, `lowercase iso2 must still hit the audited cap, got ${lower.score}`);
   });
 });
 
@@ -598,7 +1161,7 @@ describe('scoreFinancialSystemExposure — non-DRS short-term-debt slot (#6459)'
     if (key.startsWith('seed-meta:')) return { status: 'ok', fetchedAt: Date.now() };
     if (key === 'economic:wb-external-debt:v1') {
       return opts.debtRow
-        ? { countries: { [TEST_ISO2]: { value: 0, year: 2024 } }, nonDrsCountryCodes: [] }
+        ? { schemaVersion: VALID_DEBT_SCHEMA_VERSION, countries: { [TEST_ISO2]: { value: 0, year: 2024 } }, nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES }
         : reachableDebtEnvelope(opts.confirmedNonDrs ? [TEST_ISO2] : []);
     }
     if (key === 'economic:bis-lbs:v1') {
@@ -633,7 +1196,8 @@ describe('scoreFinancialSystemExposure — non-DRS short-term-debt slot (#6459)'
       TEST_ISO2,
       reader({ debtRow: false, bisRow: false, confirmedNonDrs: true }),
     );
-    assert.equal(result.coverage, 0.2, `only the FATF slot may resolve, got coverage ${result.coverage}`);
+    assert.equal(result.coverage, 0, `compliant-by-absence must also drop for a genuine data desert, got coverage ${result.coverage}`);
+    assert.equal(result.score, 0, 'absence from all three sources must not publish a resilience score');
     assert.equal(result.imputedWeight, 0, 'no BIS row means no imputation');
   });
 
@@ -664,7 +1228,80 @@ describe('scoreFinancialSystemExposure — non-DRS short-term-debt slot (#6459)'
     };
     const result = await scoreFinancialSystemExposure(TEST_ISO2, corrupt);
     assert.equal(result.imputedWeight, 0, 'a corrupt BIS row is not evidence of cross-border participation');
-    assert.equal(result.coverage, 0.2, `only the FATF slot may resolve, got coverage ${result.coverage}`);
+    assert.equal(result.coverage, 0, `a corrupt BIS row must not make compliant-by-absence resolve, got coverage ${result.coverage}`);
+  });
+});
+
+describe('scoreFinancialSystemExposure — market-access-constrained debt certainty (#6461)', () => {
+  const reader = (values: { debtPct: number; claimsPctGdp: unknown; parentCount: unknown }): ResilienceSeedReader =>
+    async (key) => {
+      if (key.startsWith('seed-meta:')) return { status: 'ok', fetchedAt: Date.now() };
+      if (key === 'economic:wb-external-debt:v1') {
+        return {
+          schemaVersion: VALID_DEBT_SCHEMA_VERSION,
+          countries: { [TEST_ISO2]: { value: values.debtPct, year: 2024 } },
+          nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES,
+        };
+      }
+      if (key === 'economic:bis-lbs:v1') {
+        return { countries: { [TEST_ISO2]: { totalXborderPctGdp: values.claimsPctGdp, parentCount: values.parentCount } } };
+      }
+      if (key === 'economic:fatf-listing:v1') {
+        return { listings: { IR: 'black', KP: 'black' }, publicationDate: '2026-06-01' };
+      }
+      return null;
+    };
+
+  it('reduces score weight and coverage only when all three constraint signals hold', async () => {
+    const result = await scoreFinancialSystemExposure(
+      TEST_ISO2,
+      reader({
+        debtPct: FIN_SYS_MARKET_ACCESS_LOW_DEBT_PCT_GNI_MAX,
+        claimsPctGdp: FIN_SYS_MARKET_ACCESS_LOW_CLAIMS_PCT_GDP_MAX - 0.01,
+        parentCount: 0,
+      }),
+    );
+
+    assert.equal(result.coverage, 0.76, 'the debt slot must report its attenuated certainty against nominal weight');
+    assert.equal(result.observedWeight, 0.755, 'the observed runtime weight must match the pinned attenuation applied to scoring');
+  });
+
+  it('treats a missing or malformed parent count as unknown rather than observed zero', async () => {
+    for (const parentCount of [null, '']) {
+      const result = await scoreFinancialSystemExposure(
+        TEST_ISO2,
+        reader({ debtPct: 0.1, claimsPctGdp: 1, parentCount }),
+      );
+
+      assert.equal(result.coverage, 0.85, 'a corrupt parent count must drop its own slot without attenuating the debt observation');
+      assert.equal(result.observedWeight, 0.85, 'unknown parent count must not masquerade as the observed zero-parent signal');
+    }
+  });
+
+  it('treats missing or malformed claims as unknown rather than observed zero', async () => {
+    for (const claimsPctGdp of [null, '']) {
+      const result = await scoreFinancialSystemExposure(
+        TEST_ISO2,
+        reader({ debtPct: 0.1, claimsPctGdp, parentCount: 0 }),
+      );
+
+      assert.equal(result.coverage, 0.7, 'corrupt claims must drop their own slot without attenuating the debt observation');
+      assert.equal(result.observedWeight, 0.7, 'unknown claims must not masquerade as the observed low-claims signal');
+    }
+  });
+
+  it('keeps full debt confidence when any market-access signal clears its boundary', async () => {
+    const controls = [
+      reader({ debtPct: FIN_SYS_MARKET_ACCESS_LOW_DEBT_PCT_GNI_MAX + 0.01, claimsPctGdp: 1, parentCount: 0 }),
+      reader({ debtPct: 0.1, claimsPctGdp: FIN_SYS_MARKET_ACCESS_LOW_CLAIMS_PCT_GDP_MAX, parentCount: 0 }),
+      reader({ debtPct: 0.1, claimsPctGdp: 1, parentCount: 1 }),
+    ];
+
+    for (const control of controls) {
+      const result = await scoreFinancialSystemExposure(TEST_ISO2, control);
+      assert.equal(result.coverage, 1, 'a country outside the three-signal intersection must retain full observed coverage');
+      assert.equal(result.observedWeight, 1, 'a country outside the three-signal intersection must retain all nominal score weight');
+    }
   });
 });
 
@@ -772,8 +1409,9 @@ describe('scoreFinancialSystemExposure — #6459 inversion probe (pinned)', () =
     if (key === 'economic:wb-external-debt:v1') {
       // MC/LU absent: neither is a World Bank Debtor Reporting System filer.
       return {
+        schemaVersion: VALID_DEBT_SCHEMA_VERSION,
         countries: { RU: { value: 3, year: 2024 }, TD: { value: 1, year: 2024 } },
-        nonDrsCountryCodes: ['LU', 'MC'],
+        nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES,
       };
     }
     if (key === 'economic:bis-lbs:v1') {
@@ -800,13 +1438,13 @@ describe('scoreFinancialSystemExposure — #6459 inversion probe (pinned)', () =
   //   MC 0.35x75(imputed) + 0.30x35(band floor) + 0.20x55(gray) + 0.15x56 = 56
   //   LU 0.35x75          + 0.30x35            + 0.20x100      + 0.15x100 = 72
   //   RU capped at 15 by the comprehensive-embargo cap (blend was 68)
-  //   TD 0.35x93 + 0.30x44 + 0.20x100 + 0.15x0                            = 66
+  //   TD (0.35x0.3)x93 + 0.30x44 + 0.20x100 + 0.15x0, /0.755             = 57
   //   IR FATF black is the only resolving slot                            = 0
   const EXPECTED: ReadonlyArray<{ cc: string; score: number; coverage: number; wasBeforeFix: number }> = [
     { cc: 'MC', score: 56, coverage: 0.76, wasBeforeFix: 22 },
     { cc: 'LU', score: 72, coverage: 0.76, wasBeforeFix: 54 },
     { cc: 'RU', score: 15, coverage: 1, wasBeforeFix: 70 },
-    { cc: 'TD', score: 66, coverage: 1, wasBeforeFix: 72 },
+    { cc: 'TD', score: 57, coverage: 0.76, wasBeforeFix: 72 },
     { cc: 'IR', score: 0, coverage: 0.2, wasBeforeFix: 0 },
   ];
 

@@ -33,7 +33,7 @@ const { __testing__ } = await import('../api/health.js');
 const DOMAIN = 'intelligence:market-implications';
 const META_KEY = 'seed-meta:intelligence:market-implications';
 const PREDICTION_META_KEY = 'seed-meta:prediction:markets';
-const RESILIENCE_INTERVAL_PROBE_KEY = 'resilience:intervals:v9:US';
+const RESILIENCE_INTERVAL_PROBE_KEY = 'resilience:intervals:v11:US';
 const RESILIENCE_INTERVAL_METHODOLOGY = 'weight-perturbation-sensitivity-v3';
 const TEST_NOW = Date.parse('2026-08-06T09:00:00.000Z');
 const ONE_MIN_MS = 60_000;
@@ -61,7 +61,13 @@ function installPipelineMock(marketImplicationsMeta, now = TEST_NOW) {
     const results = commands.map((command) => {
       const [op, key] = command;
       if (op === 'EXISTS') {
-        assert.match(String(key), /^seed-activated:/, 'EXISTS is only used for activation markers');
+        // military:bases is the one activation key outside the seed-activated:*
+        // namespace: it gates on its active-version pointer (#6845).
+        assert.match(
+          String(key),
+          /^seed-activated:|^military:bases:active$/,
+          'EXISTS is only used for activation markers',
+        );
         return { result: 0 };
       }
       assert.equal(op, 'GET');

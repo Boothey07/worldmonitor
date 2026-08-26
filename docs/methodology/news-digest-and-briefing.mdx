@@ -175,6 +175,33 @@ Within each category, items sort by `importanceScore` descending, then
 publication time descending. The feed digest returns at most `20` items per
 category.
 
+## Credibility Score
+
+`credibilityScore` is a separate 0-100 field on the same `NewsItem`. It does
+not replace `importanceScore`. It measures source reliability, not
+newsworthiness, so a highly newsworthy RT story can score high on importance
+and low on credibility.
+
+The canonical public methodology is
+[News Credibility Score](/methodology/news-credibility). The digest computes
+it in `shared/news-credibility.js` after the same classification and
+corroboration pass:
+
+| Component | Weight |
+| --- | --- |
+| Propaganda risk | `0.50` |
+| Source tier | `0.30` |
+| Independent corroboration | `0.20` |
+
+High propaganda-risk sources (state-controlled media) are capped at `40`.
+Unreviewed sources use propaganda risk `unknown` (`35`), never `low`.
+Severity, recency, and the diplomacy/flashpoint boost are **not** inputs.
+Third-party AllSides/MBFC ratings are reserved and not applied.
+
+The news list renders a `CRED NN` badge on both the flat list and clustered
+cards. MCP `get_news_intelligence` and `get_news_clusters` expose the same
+field. Relevance sort remains `importanceScore`.
+
 ## Story Tracking
 
 The digest persists sliced stories to Redis so later digest notifications and
@@ -205,18 +232,48 @@ The title hash is a SHA-256 hash of a normalised title: lowercased, stripped
 of common publisher suffixes, stripped to Unicode letters/numbers/spaces,
 collapsed whitespace, and clipped to 120 characters.
 
-Story phase is derived from first seen time, mention count, and score trend:
+Story phase is derived from first seen time and mention count:
 
 | Phase | Rule |
 | --- | --- |
 | `breaking` | Mention count is 1. |
 | `developing` | Mention count is 2-5 and the story is under 2 hours old. |
-| `fading` | Reserved for score-history support: the feed API branch requires both `currentScore` and `peakScore` to be positive and the current score to fall below half the peak. The current digest writer still stores zero placeholders for those fields, so this branch is inert on the feed-panel story phase. |
 | `sustained` | Fallback for ongoing tracked stories. |
+| `fading` | Reserved. The feed API does not emit this phase. |
 
-The notification cron has its own read-path phase helper for digest delivery.
-There, a story with more than 24 hours of silence is treated as `fading` and
-dropped from the delayed digest/brief pool.
+The feed API does not emit `fading`. The wire enum keeps the value, and clients
+must continue to handle it, but no digest response sets it.
+
+Issue #7081 tested the rule that this phase used to promise. That rule marked a
+story as fading when its current importance score fell below half of its peak
+score. The test used frozen production evidence and gave a no-go result. There
+were three reasons:
+
+1. The rule could not run. It read `peakScore` from the `story:track:v1` hash,
+   but the peak is written to the `story:peak:v1` sorted set. The hash field has
+   no writer, so it was absent on all 14,000 sampled rows. An earlier version of
+   this page said that the writer stores zero placeholders for both scores. That
+   was correct for `peakScore` only. `currentScore` is written on each cycle and
+   was above zero on all 14,000 rows.
+2. The ratio measures article age, not traction. Importance score gives severity
+   a weight of 55% and recency a weight of 10%. A critical or high story cannot
+   fall to half of its peak unless its severity changes. An info story falls
+   below half on the recency term alone when its article becomes more than 24
+   hours old. In the sampled rows the rule fired 673 times. 670 of those rows
+   were info or low severity. None of the 679 critical or high rows fired.
+3. Fading cannot be seen at that point in the build. The phase is derived only
+   for stories that appear in the current cycle, and the record passed to the
+   deriver has a last-seen time of now. A story that is no longer covered is
+   absent from the cycle, so it never reaches the deriver.
+
+The notification cron has its own read-path phase helper for digest delivery. It
+reads the accumulator, so it can see stories that are absent from the current
+cycle. There, a story with more than 24 hours of silence is treated as `fading`
+and dropped from the delayed digest/brief pool. That helper is internal. Its
+`fading` result does not reach the feed API response.
+
+The frozen evidence is in `tests/fixtures/story-phase-fading-study.json`. Run
+`node scripts/study-story-phase-fading.mjs` to replay it.
 
 ## Digest And Brief Read Path
 
@@ -349,9 +406,10 @@ LLM layer is enabled. Digest prose and
 story-description calls use temperature `0.4`. Regional weekly briefs
 intentionally differ from those digest prose and `whyMatters` surfaces:
 `scripts/regional-snapshot/weekly-brief.mjs`
-tries OpenRouter first with `deepseek/deepseek-v4-flash`, then falls back to
-Groq `llama-3.3-70b-versatile`, and sends both providers temperature
-`0.3` because the output is structured weekly JSON for regional snapshots
+tries OpenRouter first with `deepseek/deepseek-v4-flash`, then the fixed free
+OpenRouter models `google/gemma-4-26b-a4b-it:free` and
+`openai/gpt-oss-20b:free`, then Groq `openai/gpt-oss-20b`. It sends every
+provider temperature `0.3` because the output is structured weekly JSON for regional snapshots
 rather than per-user digest prose. The digest prompt requires a named
 actor/event lead, bans generic editorial phrases such as "the global stage"
 and weak stitching phrases such as "this comes as" or "meanwhile", requires

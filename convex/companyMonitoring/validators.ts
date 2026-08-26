@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { COMPANY_MONITORING_IMPORT_VERSION } from "../../shared/company-monitoring-contract";
 
 const monitoredCompanyInputFields = {
@@ -203,9 +203,91 @@ export const companyMonitoringCandidateTerminalReasonValidator = v.union(
   v.literal("company_removed"),
 );
 
+// Defense-in-depth guard for the flat candidate state product (#6778 / R16).
+// `companyMonitoringCandidates` encodes its lifecycle as `state` plus two
+// optional siblings (`holdUntil`, `terminalReason`) rather than a Convex tagged
+// union, so the schema alone permits illegal combinations — a `held` row with
+// no `holdUntil`, or a `terminalReason` stranded on a live candidate. Every
+// writer already clears the sibling it must not carry, but an out-of-band
+// `ctx.db.patch` could persist an illegal row. Call this at every candidate
+// write boundary and on every row `candidateLifecycle` reads so an illegal
+// combination fails closed instead of silently degrading. Bound checks
+// (`holdUntil > now`, `holdUntil <= expiresAt`) stay with their writers; this
+// asserts only presence/consistency of the state trio.
+export function assertValidCandidateState(candidate: {
+  state: "pending_classification" | "held" | "terminal";
+  holdUntil?: number;
+  terminalReason?: string;
+}) {
+  const hasHoldUntil = candidate.holdUntil !== undefined;
+  const hasTerminalReason = candidate.terminalReason !== undefined;
+  if (candidate.state === "held" ? !hasHoldUntil : hasHoldUntil) {
+    throw new ConvexError("COMPANY_MONITORING_CANDIDATE_STATE_INVALID");
+  }
+  if (candidate.state === "terminal" ? !hasTerminalReason : hasTerminalReason) {
+    throw new ConvexError("COMPANY_MONITORING_CANDIDATE_STATE_INVALID");
+  }
+}
+
+const companyMonitoringAdmissionAxisFields = {
+  confidence: v.number(),
+  rationale: v.string(),
+  evidenceIds: v.array(v.string()),
+};
+
+export const companyMonitoringAdmissionClassificationValidator = v.object({
+  attribution: v.object({
+    truth: v.union(
+      v.literal("confirmed"),
+      v.literal("wrong_company"),
+      v.literal("uncertain"),
+    ),
+    ...companyMonitoringAdmissionAxisFields,
+  }),
+  occurrence: v.object({
+    truth: v.union(v.literal("confirmed"), v.literal("false"), v.literal("uncertain")),
+    ...companyMonitoringAdmissionAxisFields,
+  }),
+  materiality: v.object({
+    truth: v.union(v.literal("material"), v.literal("not_material"), v.literal("uncertain")),
+    ...companyMonitoringAdmissionAxisFields,
+  }),
+  direction: v.union(v.literal("positive"), v.literal("negative"), v.literal("mixed")),
+  channels: v.array(v.union(v.literal("financial"), v.literal("reputation"))),
+  magnitude: v.union(
+    v.literal("low"),
+    v.literal("medium"),
+    v.literal("high"),
+    v.literal("critical"),
+  ),
+  category: v.string(),
+  title: v.string(),
+  neutralSummary: v.string(),
+  positiveRationale: v.string(),
+  negativeRationale: v.string(),
+  conflict: v.boolean(),
+});
+
+export const companyMonitoringAdmissionAuthorityValidator = v.object({
+  hasVerifiedFirstPartyPrimary: v.boolean(),
+  independentOriginCount: v.number(),
+  satisfiesAuthority: v.boolean(),
+  qualifyingEvidenceIds: v.array(v.string()),
+});
+
+export const companyMonitoringAdmissionConfidenceFloorsValidator = v.object({
+  attribution: v.number(),
+  eventTruth: v.number(),
+  materialImpact: v.number(),
+  overall: v.literal("minimum_axis"),
+});
+
 export const companyMonitoringProviderEvidenceValidator = v.object({
   provider: companyMonitoringEvidenceProviderValidator,
   providerLocator: v.string(),
+  // Optional only for rows written before #6011. Admission fails closed when
+  // a referenced row has no query version; every live ingestion path sets it.
+  queryVersion: v.optional(v.string()),
   url: v.optional(v.string()),
   title: v.optional(v.string()),
   text: v.optional(v.string()),

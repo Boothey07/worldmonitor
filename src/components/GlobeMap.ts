@@ -51,6 +51,7 @@ import {
   type GlobeLayerTruncation,
   type GlobeMarkerGroup,
 } from '@/utils/globe-marker-budget';
+import { renderLayerTruncationBadges } from '@/utils/layer-truncation-badge';
 import type { FeatureCollection, Geometry } from 'geojson';
 import type { MapLayers, Hotspot, MilitaryFlight, MilitaryVessel, MilitaryVesselCluster, NaturalEvent, InternetOutage, CyberThreat, SocialUnrestEvent, UcdpGeoEvent, MilitaryBase, GammaIrradiator, Spaceport, EconomicCenter, StrategicWaterway, CriticalMineralProject, AIDataCenter, UnderseaCable, Pipeline, CableAdvisory, RepairShip, AisDisruptionEvent, AisDensityZone, AisDisruptionType } from '@/types';
 import type { Earthquake } from '@/services/earthquakes';
@@ -74,11 +75,13 @@ import type { TrafficAnomaly as ProtoTrafficAnomaly, DdosLocationHit } from '@/g
 import type { RadiationObservation } from '@/services/radiation';
 import type { ScenarioVisualState } from '@/config/scenario-templates';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { renderPopupSourceLinks } from './map-popup-source-links';
 import {
   applyPremiumLayerPresentation,
   getPremiumLayerPresentation,
   PremiumLayerGate,
 } from './premium-layer-gate';
+import { globeAltitudeToMapZoom, mapZoomToGlobeAltitude } from '@/utils/globe-zoom';
 
 export interface GlobeMapOptions {
   onInitError?: (error: unknown) => void;
@@ -207,6 +210,7 @@ interface ProtestMarker extends BaseMarker {
   title: string;
   eventType: string;
   country: string;
+  sourceUrls?: string[];
 }
 interface UcdpMarker extends BaseMarker {
   _kind: 'ucdp';
@@ -482,9 +486,9 @@ interface GlobeControlsLike {
   removeEventListener(type: string, listener: () => void): void;
 }
 
-// Duration (ms) of the globe.gl pointOfView rotation used by setCenter(). Shared
-// so callers that must wait for the rotation to settle (e.g. openChokepoint,
-// which opens a popup at container centre) stay in lockstep with the animation.
+// Duration (ms) of the globe.gl pointOfView rotation used by programmatic
+// viewport moves. Shared so settlement callers and openChokepoint stay in
+// lockstep with the animation.
 const SET_CENTER_ROTATION_MS = 1200;
 
 export class GlobeMap {
@@ -616,6 +620,14 @@ export class GlobeMap {
 
   // Callbacks
   private onLayerChangeCb: ((layer: keyof MapLayers, enabled: boolean, source: 'user' | 'programmatic') => void) | null = null;
+  private onStateChangeCb: ((state: MapContainerState) => void) | null = null;
+  private viewportSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  private viewportSettledPromise: Promise<boolean> = Promise.resolve(true);
+  private resolveViewportSettled: ((completed: boolean) => void) | null = null;
+  private viewportTarget: { lat: number; lng: number; altitude: number } | null = null;
+  private viewportSettleDeadline = 0;
+  private viewportAutoRotateBeforeMove: boolean | null = null;
+  private viewportMovementGeneration = 0;
   private onMapContextMenuCb?: (payload: { lat: number; lon: number; screenX: number; screenY: number }) => void;
   private readonly handleContextMenu = (e: MouseEvent): void => {
     e.preventDefault();
@@ -721,11 +733,22 @@ export class GlobeMap {
     controls.enableDamping = !desktop;
 
     this.controlsEndHandler = () => {
+      // Snapshot before publishing state: a synchronous subscriber can start a
+      // newer movement, and this old event must never settle that generation.
+      const viewportMovementGeneration = this.viewportTarget
+        ? this.viewportMovementGeneration
+        : null;
       // Truncated layers are ranked by nearness to the camera, so the visible
       // subset is only correct for the POV it was computed at. Re-select when
       // the camera settles — that is what makes "rotate or zoom to bring others
       // in" true rather than a promise the badge cannot keep (#5368).
       this.reselectMarkersForViewport();
+      this.onStateChangeCb?.(this.getState());
+      if (viewportMovementGeneration !== null) {
+        queueMicrotask(() => {
+          this.trySettleViewportMovement(true, viewportMovementGeneration);
+        });
+      }
       if (!this.layers.satellites) return;
       if (this.imageryFetchTimer) clearTimeout(this.imageryFetchTimer);
       this.imageryFetchTimer = setTimeout(() => this.fetchImageryForViewport(), 800);
@@ -769,6 +792,11 @@ export class GlobeMap {
     // Pause auto-rotate on user interaction; resume after 60 s idle (like Sentinel)
     const pauseAutoRotate = () => {
       if (this.renderPaused) return;
+      // A user gesture during a tracked camera move owns the post-move state:
+      // do not restore the auto-rotation that was active before the tween.
+      if (this.viewportAutoRotateBeforeMove !== null) {
+        this.viewportAutoRotateBeforeMove = false;
+      }
       controls.autoRotate = false;
       if (this.autoRotateTimer) clearTimeout(this.autoRotateTimer);
     };
@@ -776,7 +804,12 @@ export class GlobeMap {
       if (this.renderPaused) return;
       if (this.autoRotateTimer) clearTimeout(this.autoRotateTimer);
       this.autoRotateTimer = setTimeout(() => {
-        if (!this.renderPaused) controls.autoRotate = !desktop;
+        if (this.renderPaused) return;
+        if (this.viewportAutoRotateBeforeMove !== null) {
+          this.viewportAutoRotateBeforeMove = !desktop;
+        } else {
+          controls.autoRotate = !desktop;
+        }
       }, 60_000);
     };
 
@@ -960,7 +993,7 @@ export class GlobeMap {
           }
           if (isAllowedPreviewUrl(d.previewUrl)) {
             const safeHref = escapeHtml(new URL(d.previewUrl!).href);
-            label += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview">`;
+            label += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview" alt="">`;
           }
           return label;
         }
@@ -1370,7 +1403,10 @@ export class GlobeMap {
     if (d._kind === 'webcam-cluster' && this.globe) {
       const pov = this.globe.pointOfView();
       // Fly to cluster and zoom in (reduce altitude by 60%)
-      this.globe.pointOfView({ lat: d._lat, lng: d._lng, altitude: pov.altitude * 0.4 }, 800);
+      this.moveViewport(
+        { lat: d._lat, lng: d._lng, altitude: pov.altitude * 0.4 },
+        800,
+      );
     }
     if (d._kind === 'radiation' && this.popup) {
       const aRect = anchor.getBoundingClientRect();
@@ -1528,7 +1564,8 @@ export class GlobeMap {
       const c = typeColors[d.eventType] ?? '#ffaa00';
       html = `<span style="color:${c};font-weight:bold;">📢 ${esc(d.eventType)}</span>` +
              `<br><span style="opacity:.7;">${esc(d.country)}</span>` +
-             `<br><span style="opacity:.7;white-space:normal;display:block;">${esc(d.title.slice(0, 70))}</span>`;
+             `<br><span style="opacity:.7;white-space:normal;display:block;">${esc(d.title.slice(0, 70))}</span>` +
+             renderPopupSourceLinks(d.sourceUrls, { limit: 1 });
     } else if (d._kind === 'ucdp') {
       html = `<span style="color:#ff6400;font-weight:bold;">⚔ ${esc(d.country)}</span>` +
              `<br><span style="opacity:.7;">${esc(d.sideA)} vs ${esc(d.sideB)}</span>` +
@@ -1669,7 +1706,7 @@ export class GlobeMap {
       }
       if (isAllowedPreviewUrl(d.previewUrl)) {
         const safeHref = escapeHtml(new URL(d.previewUrl!).href);
-        html += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview">`;
+        html += `<br><img src="${safeHref}" referrerpolicy="no-referrer" style="max-width:180px;max-height:120px;margin-top:4px;border-radius:4px;" class="imagery-preview" alt="">`;
       }
     } else if (d._kind === 'webcam') {
       html = '';
@@ -1918,9 +1955,9 @@ export class GlobeMap {
     setTrustedHtml(el, trustedHtml(`
       <span class="globe-beta-badge">BETA</span>
       <div class="zoom-controls">
-        <button class="map-btn zoom-in"    title="Zoom in">+</button>
-        <button class="map-btn zoom-out"   title="Zoom out">-</button>
-        <button class="map-btn zoom-reset" title="Reset view">&#8962;</button>
+        <button class="map-btn zoom-in"    title="Zoom in" aria-label="Zoom in">+</button>
+        <button class="map-btn zoom-out"   title="Zoom out" aria-label="Zoom out">-</button>
+        <button class="map-btn zoom-reset" title="Reset view" aria-label="Reset view">&#8962;</button>
       </div>`, "legacy direct innerHTML migration"));
     this.container.appendChild(el);
     el.addEventListener('click', (e) => {
@@ -1936,7 +1973,7 @@ export class GlobeMap {
     const pov = this.globe.pointOfView();
     if (!pov) return;
     const alt = Math.max(0.05, (pov.altitude ?? 1.8) * 0.6);
-    this.globe.pointOfView({ lat: pov.lat, lng: pov.lng, altitude: alt }, 500);
+    this.moveViewport({ lat: pov.lat, lng: pov.lng, altitude: alt }, 500);
   }
 
   private zoomOutGlobe(): void {
@@ -1944,7 +1981,7 @@ export class GlobeMap {
     const pov = this.globe.pointOfView();
     if (!pov) return;
     const alt = Math.min(4.0, (pov.altitude ?? 1.8) * 1.6);
-    this.globe.pointOfView({ lat: pov.lat, lng: pov.lng, altitude: alt }, 500);
+    this.moveViewport({ lat: pov.lat, lng: pov.lng, altitude: alt }, 500);
   }
 
   private createLayerToggles(): void {
@@ -2864,26 +2901,7 @@ export class GlobeMap {
   private updateLayerTruncationLabels(): void {
     const root = this.layerTogglesEl;
     if (!root) return;
-    for (const row of Array.from(root.querySelectorAll<HTMLElement>('.layer-toggle-row'))) {
-      const layer = row.getAttribute('data-layer');
-      const counts = layer ? this.markerTruncation[layer] : undefined;
-      const existing = row.querySelector<HTMLElement>('.layer-truncation-count');
-      if (!counts) { existing?.remove(); continue; }
-      const badge = existing ?? document.createElement('span');
-      if (!existing) {
-        badge.className = 'layer-truncation-count';
-        // Sibling of the <label>, not a child: inside it, every click on the
-        // badge would toggle the layer off. `.layer-explain-btn` sits outside
-        // the label for the same reason.
-        row.appendChild(badge);
-      }
-      badge.textContent = `${counts.shown}/${counts.total}`;
-      // Untranslated literal: a new i18n key is a ~29-file change across locales,
-      // and the badge itself is numeric. Real key tracked as follow-up.
-      // Says "nearest this view" rather than "highest priority" because that is
-      // what the ranking actually does for layers with no severity of their own.
-      badge.title = `Showing ${counts.shown} of ${counts.total} markers — the most significant, and those nearest the current view. The globe caps markers per layer to keep interaction responsive; rotate or zoom to bring others in.`;
-    }
+    renderLayerTruncationBadges(root, this.markerTruncation, 'rotate');
   }
 
   /**
@@ -2932,43 +2950,136 @@ export class GlobeMap {
     oceania:  { lat: -25, lng: 140,  altitude: 1.5 },
   };
 
+  private markViewportMoving(
+    target: { lat: number; lng: number; altitude: number },
+    durationMs: number,
+  ): number {
+    // Concrete renderer entry points (buttons, marker clicks and fitCountry)
+    // can bypass MapContainer's facade token. Give every one its own promise so
+    // a superseding local command resolves the older caller as interrupted.
+    this.resolveViewportSettled?.(false);
+    this.viewportSettledPromise = new Promise((resolve) => {
+      this.resolveViewportSettled = resolve;
+    });
+    const generation = ++this.viewportMovementGeneration;
+    // OrbitControls updates auto-rotation in the same frame loop as globe.gl's
+    // camera tween. Preserve its state across the whole tracked movement so it
+    // cannot pull the camera away from the exact target before settlement is
+    // observed. A superseding movement keeps the original pre-move state.
+    if (this.controls && this.viewportAutoRotateBeforeMove === null) {
+      this.viewportAutoRotateBeforeMove = this.controls.autoRotate;
+      this.controls.autoRotate = false;
+    }
+    this.viewportTarget = target;
+    this.viewportSettleDeadline = Date.now() + 15_000;
+    if (this.viewportSettleTimer) clearTimeout(this.viewportSettleTimer);
+    this.viewportSettleTimer = setTimeout(
+      () => this.trySettleViewportMovement(false, generation),
+      durationMs + 50,
+    );
+    return generation;
+  }
+
+  private trySettleViewportMovement(
+    finalMovementEvent = false,
+    generation = this.viewportMovementGeneration,
+  ): void {
+    if (generation !== this.viewportMovementGeneration) return;
+    if (this.destroyed) {
+      this.settleViewportMovement(false, generation);
+      return;
+    }
+    const target = this.viewportTarget;
+    const pov = this.globe?.pointOfView();
+    const longitudeDelta = target && pov
+      ? Math.abs((((pov.lng - target.lng) + 540) % 360) - 180)
+      : Number.POSITIVE_INFINITY;
+    const atTarget = Boolean(target && pov
+      && Math.abs(pov.lat - target.lat) <= 0.0001
+      && longitudeDelta <= 0.0001
+      && Math.abs(pov.altitude - target.altitude) <= 0.001);
+    if (atTarget) {
+      this.settleViewportMovement(true, generation);
+      return;
+    }
+    if (finalMovementEvent) {
+      this.settleViewportMovement(false, generation);
+      return;
+    }
+    if (Date.now() >= this.viewportSettleDeadline) {
+      this.settleViewportMovement(false, generation);
+      return;
+    }
+    // globe.gl animations are driven by requestAnimationFrame, which can pause
+    // in background tabs even as timers run. Keep polling instead of claiming
+    // visual completion from elapsed wall-clock time alone.
+    this.viewportSettleTimer = setTimeout(
+      () => this.trySettleViewportMovement(false, generation),
+      100,
+    );
+  }
+
+  private settleViewportMovement(
+    completed: boolean,
+    generation = this.viewportMovementGeneration,
+  ): void {
+    if (generation !== this.viewportMovementGeneration) return;
+    if (this.viewportSettleTimer) {
+      clearTimeout(this.viewportSettleTimer);
+      this.viewportSettleTimer = null;
+    }
+    if (!this.destroyed && this.globe) {
+      this.reselectMarkersForViewport();
+      this.onStateChangeCb?.(this.getState());
+    }
+    this.viewportTarget = null;
+    this.viewportSettleDeadline = 0;
+    this.viewportMovementGeneration++;
+    const resolve = this.resolveViewportSettled;
+    this.resolveViewportSettled = null;
+    resolve?.(completed);
+    if (!this.destroyed && this.viewportAutoRotateBeforeMove !== null) {
+      if (this.renderPaused && this.controlsAutoRotateBeforePause !== null) {
+        // Keep the renderer paused now, but let setRenderPaused(false) restore
+        // the state that existed before the programmatic movement.
+        this.controlsAutoRotateBeforePause = this.viewportAutoRotateBeforeMove;
+      } else if (this.controls) {
+        this.controls.autoRotate = this.viewportAutoRotateBeforeMove;
+      }
+    }
+    this.viewportAutoRotateBeforeMove = null;
+  }
+
+  public whenViewportSettled(): Promise<boolean> {
+    return this.viewportSettledPromise;
+  }
+
+  private moveViewport(
+    target: { lat: number; lng: number; altitude: number },
+    durationMs = SET_CENTER_ROTATION_MS,
+  ): void {
+    if (!this.globe) return;
+    this.wakeGlobe();
+    this.markViewportMoving(target, durationMs);
+    this.globe.pointOfView(target, durationMs);
+  }
+
   public setView(view: MapView, zoom?: number): void {
     this.currentView = view;
     if (!this.globe) return;
     this.wakeGlobe();
     const preset = GlobeMap.VIEW_POVS[view] ?? GlobeMap.VIEW_POVS.global;
-    let altitude = preset.altitude;
-    if (zoom !== undefined) {
-      if      (zoom >= 7) altitude = 0.08;
-      else if (zoom >= 6) altitude = 0.15;
-      else if (zoom >= 5) altitude = 0.3;
-      else if (zoom >= 4) altitude = 0.5;
-      else if (zoom >= 3) altitude = 0.8;
-      else                altitude = 1.5;
-    }
-    this.globe.pointOfView({ lat: preset.lat, lng: preset.lng, altitude }, SET_CENTER_ROTATION_MS);
-    // Programmatic moves emit no controls 'end' event, so re-select once the
-    // transition has landed on the new POV.
-    setTimeout(() => this.reselectMarkersForViewport(), SET_CENTER_ROTATION_MS + 50);
+    const altitude = zoom === undefined ? preset.altitude : mapZoomToGlobeAltitude(zoom);
+    // Programmatic moves emit no controls 'end' event, so publish state and
+    // re-select markers once the transition has landed on the new POV.
+    this.moveViewport({ lat: preset.lat, lng: preset.lng, altitude });
   }
 
   public setCenter(lat: number, lon: number, zoom?: number): void {
     if (!this.globe) return;
     this.wakeGlobe();
-    // Map deck.gl zoom levels → globe.gl altitude
-    // deck.gl: 2=world, 3=continent, 4=country, 5=region, 6+=city
-    // globe.gl altitude: 1.8=full globe, 0.6=country, 0.15=city
-    let altitude = 1.2;
-    if (zoom !== undefined) {
-      if      (zoom >= 7) altitude = 0.08;
-      else if (zoom >= 6) altitude = 0.15;
-      else if (zoom >= 5) altitude = 0.3;
-      else if (zoom >= 4) altitude = 0.5;
-      else if (zoom >= 3) altitude = 0.8;
-      else                altitude = 1.5;
-    }
-    this.globe.pointOfView({ lat, lng: lon, altitude }, SET_CENTER_ROTATION_MS);
-    setTimeout(() => this.reselectMarkersForViewport(), SET_CENTER_ROTATION_MS + 50);
+    const altitude = zoom === undefined ? 1.2 : mapZoomToGlobeAltitude(zoom);
+    this.moveViewport({ lat, lng: lon, altitude });
   }
 
   public getCenter(): { lat: number; lon: number } | null {
@@ -3001,8 +3112,9 @@ export class GlobeMap {
   // ─── State API ────────────────────────────────────────────────────────────
 
   public getState(): MapContainerState {
+    const altitude = this.globe?.pointOfView()?.altitude;
     return {
-      zoom: 1,
+      zoom: globeAltitudeToMapZoom(altitude),
       pan: { x: 0, y: 0 },
       view: this.currentView,
       layers: this.layers,
@@ -3038,7 +3150,16 @@ export class GlobeMap {
     // After drag-resize or fullscreen transition completes, re-sync dimensions
     if (!isResizing) this.resize();
   }
-  public setZoom(_z: number): void {}
+  public setZoom(zoom: number): void {
+    if (!this.globe) return;
+    const pov = this.globe.pointOfView();
+    if (!pov) return;
+    this.moveViewport({
+      lat: pov.lat,
+      lng: pov.lng,
+      altitude: mapZoomToGlobeAltitude(zoom),
+    });
+  }
   public setRenderPaused(paused: boolean): void {
     if (this.renderPaused === paused) return;
     this.renderPaused = paused;
@@ -3055,7 +3176,11 @@ export class GlobeMap {
 
     if (this.controls) {
       if (paused) {
-        this.controlsAutoRotateBeforePause = this.controls.autoRotate;
+        // A tracked movement temporarily forces autoRotate off. Preserve the
+        // state that should exist after that movement, not the forced value,
+        // so unpausing later restores the real pre-pause preference.
+        this.controlsAutoRotateBeforePause = this.viewportAutoRotateBeforeMove
+          ?? this.controls.autoRotate;
         this.controlsDampingBeforePause = this.controls.enableDamping;
         this.controls.autoRotate = false;
         this.controls.enableDamping = false;
@@ -3155,7 +3280,7 @@ export class GlobeMap {
     const span = Math.max(maxLat - minLat, maxLon - minLon);
     // Map geographic span → altitude: large country (Russia ~170°) vs small (Luxembourg ~0.5°)
     const altitude = span > 60 ? 1.0 : span > 20 ? 0.7 : span > 8 ? 0.45 : span > 3 ? 0.25 : 0.12;
-    this.globe.pointOfView({ lat, lng, altitude }, 1200);
+    this.moveViewport({ lat, lng, altitude }, 1200);
   }
   public highlightCountry(_code: string): void {}
   public clearCountryHighlight(): void {}
@@ -3201,15 +3326,17 @@ export class GlobeMap {
   }
 
   public setImageryScenes(scenes: ImageryScene[]): void {
-    const valid = (scenes ?? []).filter(s => {
+    // Parse each scene's GeoJSON once — the filter, marker, and polygon
+    // passes previously re-parsed the identical string up to 3x per scene.
+    const parsed = (scenes ?? []).flatMap(s => {
       try {
-        const geom = JSON.parse(s.geometryGeojson);
-        return geom?.type === 'Polygon' && geom.coordinates?.[0]?.[0];
-      } catch { return false; }
+        const geom = JSON.parse(s.geometryGeojson) as { type?: string; coordinates?: number[][][] };
+        if (geom?.type !== 'Polygon' || !geom.coordinates?.[0]?.[0]) return [];
+        return [{ s, geom }];
+      } catch { return []; }
     });
-    this.imagerySceneMarkers = valid.map(s => {
-      const geom = JSON.parse(s.geometryGeojson);
-      const coords = geom.coordinates[0] as number[][];
+    this.imagerySceneMarkers = parsed.map(({ s, geom }) => {
+      const coords = geom.coordinates![0] as number[][];
       const lats = coords.map(c => c[1] ?? 0);
       const lons = coords.map(c => c[0] ?? 0);
       const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
@@ -3225,8 +3352,7 @@ export class GlobeMap {
         previewUrl: s.previewUrl,
       };
     });
-    this.imageryFootprintPolygons = valid.map(s => {
-      const geom = JSON.parse(s.geometryGeojson);
+    this.imageryFootprintPolygons = parsed.map(({ s, geom }) => {
       return {
         coords: geom.coordinates as number[][][],
         name: `${s.satellite} ${s.datetime}`,
@@ -3367,6 +3493,7 @@ export class GlobeMap {
       title: e.title ?? '',
       eventType: e.eventType ?? 'protest',
       country: e.country ?? '',
+      sourceUrls: e.sourceUrls,
     }));
     this.flushMarkers();
   }
@@ -3680,7 +3807,7 @@ export class GlobeMap {
   }
   public onHotspotClicked(cb: (h: Hotspot) => void): void { this.onHotspotClickCb = cb; }
   public onTimeRangeChanged(_cb: (r: TimeRange) => void): void {}
-  public onStateChanged(_cb: (s: MapContainerState) => void): void {}
+  public onStateChanged(cb: (s: MapContainerState) => void): void { this.onStateChangeCb = cb; }
   public setOnCountry(_cb: any): void {}
   public getHotspotLevel(_id: string) { return 'low'; }
 
@@ -3922,6 +4049,7 @@ export class GlobeMap {
       this.controlsEndHandler = null;
     }
     this.destroyed = true;
+    this.settleViewportMovement(false);
     if (this.extrasAnimFrameId != null) {
       cancelAnimationFrame(this.extrasAnimFrameId);
       this.extrasAnimFrameId = null;
@@ -3958,6 +4086,7 @@ export class GlobeMap {
     this.controls = null;
     this.controlsAutoRotateBeforePause = null;
     this.controlsDampingBeforePause = null;
+    this.viewportAutoRotateBeforeMove = null;
     this.layerTogglesEl = null;
     if (this.globe) {
       try { this.globe._destructor(); } catch { /* ignore */ }

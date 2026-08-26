@@ -50,6 +50,10 @@ import {
   fetchPredictions,
   fetchEarthquakes,
   fetchWeatherAlerts,
+  fetchCanadaRoads,
+  CANADA_ROAD_FRESHNESS_IDS,
+  getCanadaRoadSourceStates,
+  fetchCanadaAlerts,
   fetchInternetOutages,
   fetchTrafficAnomalies,
   fetchDdosAttacks,
@@ -124,18 +128,22 @@ import { fetchSecurityAdvisories } from '@/services/security-advisories';
 import { fetchThermalEscalations } from '@/services/thermal-escalation';
 import { fetchCrossSourceSignals } from '@/services/cross-source-signals';
 import { fetchTelegramFeed } from '@/services/telegram-intel';
+import { fetchXFeed, isUsableHydratedXFeed } from '@/services/x-intel';
 import { fetchOrefAlerts, startOrefPolling, stopOrefPolling, onOrefAlertsUpdate } from '@/services/oref-alerts';
 import { getResilienceRanking } from '@/services/resilience';
 import { buildResilienceChoroplethMap } from '@/components/resilience-choropleth-utils';
 import { enrichEventsWithExposure } from '@/services/population-exposure';
 import { debounce, getCircuitBreakerCooldownInfo, loadFromStorage, saveToStorage } from '@/utils';
+import { addLocalDays, localYmd } from '@/utils/local-date';
 import { isFeatureAvailable, isFeatureEnabled } from '@/services/runtime-config';
 import { hasPremiumAccess } from '@/services/panel-gating';
 import { isDesktopRuntime, toApiUrl } from '@/services/runtime';
 import { filterFeedsByLanguage } from '@/services/feed-language';
 import { getAiFlowSettings } from '@/services/ai-flow-settings';
 import { t, getCurrentLanguage } from '@/services/i18n';
-import { getHydratedData } from '@/services/bootstrap';
+import { ensureHydrated, getHydratedData } from '@/services/bootstrap';
+import { ensurePipelineRegistriesHydrated } from '@/shared/pipeline-registry-store';
+import { ensureStorageFacilityRegistryHydrated } from '@/shared/storage-facility-registry-store';
 import { publicRpcFetch } from '@/services/public-rpc-fetch';
 import type { ListFeedDigestResponse } from '@/generated/client/worldmonitor/news/v1/service_client';
 import type { GetSectorSummaryResponse, ListMarketQuotesResponse, ListCommodityQuotesResponse } from '@/generated/client/worldmonitor/market/v1/service_client';
@@ -156,9 +164,7 @@ import { mountCommunityWidget } from '@/components/CommunityWidget';
 import type { StockAnalysisPanel } from '@/components/StockAnalysisPanel';
 import type { StockBacktestPanel } from '@/components/StockBacktestPanel';
 import type { PredictionPanel } from '@/components/PredictionPanel';
-import type { MonitorPanel } from '@/components/MonitorPanel';
 import type { InsightsPanel } from '@/components/InsightsPanel';
-import type { ThreatTimelinePanel } from '@/components/ThreatTimelinePanel';
 import type { InternetDisruptionsPanel } from '@/components/InternetDisruptionsPanel';
 import type { StrategicPosturePanel } from '@/components/StrategicPosturePanel';
 import type { EconomicPanel } from '@/components/EconomicPanel';
@@ -214,7 +220,7 @@ import {
 // dashboard critical path (#4404).
 import type { GeoHubsPanel } from '@/components/GeoHubsPanel';
 import type { TechHubsPanel } from '@/components/TechHubsPanel';
-import { ResearchServiceClient } from '@/services/generated-rpc-clients';
+import { EconomicServiceClient, MarketServiceClient, ResearchServiceClient } from '@/services/generated-rpc-clients';
 
 // The proto-level -> label map lives in shared/news-clustering-core.js so the
 // client digest loader and the server-side MCP tools cannot drift (#5697).
@@ -236,6 +242,7 @@ function protoItemToNewsItem(p: ProtoNewsItem): NewsItem {
     pubDate: new Date(p.publishedAt),
     isAlert: p.isAlert,
     importanceScore: p.importanceScore || undefined,
+    credibilityScore: Number.isFinite(p.credibilityScore) ? p.credibilityScore : undefined,
     corroborationCount: p.corroborationCount || undefined,
     storyMeta: p.storyMeta && p.storyMeta.phase !== 'STORY_PHASE_UNSPECIFIED' ? {
       firstSeen:    p.storyMeta.firstSeen,
@@ -252,6 +259,7 @@ function protoItemToNewsItem(p: ProtoNewsItem): NewsItem {
     ...(p.locationName && { locationName: p.locationName }),
     ...(p.location && { lat: p.location.latitude, lon: p.location.longitude }),
     ...(p.importanceScore ? { importanceScore: p.importanceScore } : {}),
+    ...(Number.isFinite(p.credibilityScore) ? { credibilityScore: p.credibilityScore } : {}),
     ...(p.corroborationCount ? { corroborationCount: p.corroborationCount } : {}),
     // Cleaned RSS description (U3 proto field 12). Only populated when the
     // upstream feed carried a usable <description>/<content:encoded>/<summary>;
@@ -424,12 +432,18 @@ export class DataLoaderManager implements AppModule {
   private readonly marketLoadGuard = new LatestRequestGuard();
   private globalTenderGeneration = 0;
   private globalTenderFilters: GlobalTenderFilters = {};
+  private activeGlobalTenderScopedGeneration: number | null = null;
   private dailyBriefFrameworkUnsubscribe: (() => void) | null = null;
   private marketImplicationsFrameworkUnsubscribe: (() => void) | null = null;
   private cachedSatRecs: SatRecEntry[] | null = null;
   private loadAllDataPromise: Promise<void> | null = null;
   private loadAllDataRerunRequested = false;
   private loadAllDataQueuedForceAll = false;
+  private xIntelAbortController: AbortController | null = null;
+  // True once a live X fetch has rendered. Gates whether a later transport
+  // failure may blank the panel (it may not) or must surface an error (it must,
+  // when nothing good is on screen yet).
+  private xIntelHasLiveData = false;
 
   private digestBreaker = { state: 'closed' as 'closed' | 'open' | 'half-open', failures: 0, cooldownUntil: 0 };
   private readonly digestRequestTimeoutMs = 8000;
@@ -551,9 +565,13 @@ export class DataLoaderManager implements AppModule {
   }
 
   destroy(): void {
+    this.globalTenderGeneration += 1;
+    this.activeGlobalTenderScopedGeneration = null;
     this.stopSatellitePropagation();
     if (this.imageryRetryTimer) { clearTimeout(this.imageryRetryTimer); this.imageryRetryTimer = null; }
     this.applyTimeRangeFilterToNewsPanelsDebounced.cancel();
+    this.xIntelAbortController?.abort();
+    this.xIntelAbortController = null;
     stopOrefPolling();
     if (this.boundMarketWatchlistHandler) {
       window.removeEventListener('wm-market-watchlist-changed', this.boundMarketWatchlistHandler as EventListener);
@@ -615,7 +633,9 @@ export class DataLoaderManager implements AppModule {
 
     if (this.digestBreaker.state === 'open') {
       if (now < this.digestBreaker.cooldownUntil) {
-        return this.getRetainedDigest(requestKey) ?? await this.loadPersistedDigest(requestKey);
+        const fallback = this.getRetainedDigest(requestKey) ?? await this.loadPersistedDigest(requestKey);
+        this.reportDigestCoverage(fallback, fallback ? 'stale' : 'unavailable');
+        return fallback;
       }
       this.digestBreaker.state = 'half-open';
     }
@@ -646,9 +666,12 @@ export class DataLoaderManager implements AppModule {
         // The response is valid for the scope it requested and may refresh that
         // scope's persistent cache, but it must not become live data or an
         // in-memory fallback for the language now active.
-        return this.getRetainedDigest(currentKey) ?? await this.loadPersistedDigest(currentKey);
+        const fallback = this.getRetainedDigest(currentKey) ?? await this.loadPersistedDigest(currentKey);
+        this.reportDigestCoverage(fallback, fallback ? 'stale' : 'unavailable');
+        return fallback;
       }
       this.lastGoodDigest = retainRicherScopedDigest(this.lastGoodDigest, requestKey, data);
+      this.reportDigestCoverage(data);
       return data;
     } catch (e) {
       markLcpDebug('wm:data:feed-digest-error');
@@ -659,7 +682,9 @@ export class DataLoaderManager implements AppModule {
         this.digestBreaker.cooldownUntil = now + this.digestBreakerCooldownMs;
       }
       const currentKey = this.digestCacheKey();
-      return this.getRetainedDigest(currentKey) ?? await this.loadPersistedDigest(currentKey);
+      const fallback = this.getRetainedDigest(currentKey) ?? await this.loadPersistedDigest(currentKey);
+      this.reportDigestCoverage(fallback, fallback ? 'stale' : 'unavailable');
+      return fallback;
     }
   }
 
@@ -704,6 +729,50 @@ export class DataLoaderManager implements AppModule {
 
   private getRetainedDigest(key = this.digestCacheKey()): ListFeedDigestResponse | null {
     return getScopedDigest(this.lastGoodDigest, key);
+  }
+
+  /**
+   * #7085: surface the digest's coverage block on the status panel. Runtime
+   * guards throughout — persisted last-good digests from before the coverage
+   * rollout carry no coverage field at all.
+   */
+  private reportDigestCoverage(
+    digest: ListFeedDigestResponse | null,
+    stateOverride?: 'stale' | 'unavailable',
+  ): void {
+    const cov = digest?.coverage;
+    if (!cov || typeof cov.state !== 'string') {
+      const categoryEntries = digest ? Object.entries(digest.categories) : [];
+      const items = categoryEntries.flatMap(([, bucket]) => bucket.items);
+      this.ctx.statusPanel?.updateDigestCoverage({
+        state: stateOverride ?? 'unknown',
+        itemsServed: items.length,
+        publisherCount: new Set(items.map(item => item.source).filter(Boolean)).size,
+        feedsCompleted: 0,
+        feedsTotal: 0,
+        categoriesCompleted: categoryEntries.filter(([, bucket]) => bucket.items.length > 0).length,
+        categoriesTotal: categoryEntries.length,
+        missingCategories: categoryEntries
+          .filter(([, bucket]) => bucket.items.length === 0)
+          .map(([category]) => category),
+      });
+      return;
+    }
+    const state = stateOverride ?? (cov.state === 'complete' || cov.state === 'partial' || cov.state === 'stale' || cov.state === 'unavailable'
+      ? cov.state
+      : 'unknown');
+    this.ctx.statusPanel?.updateDigestCoverage({
+      state,
+      itemsServed: Number(cov.itemsServed) || 0,
+      publisherCount: Number(cov.publisherCount) || 0,
+      feedsCompleted: Number(cov.feedCompleted) || 0,
+      feedsTotal: Number(cov.feedTotal) || 0,
+      categoriesCompleted: Number(cov.categoryCompleted) || 0,
+      categoriesTotal: Number(cov.categoryTotal) || 0,
+      missingCategories: Object.entries(cov.categoryStates ?? {})
+        .filter(([, v]) => v === 'missing')
+        .map(([k]) => k),
+    });
   }
 
   private async loadPersistedDigest(key = this.digestCacheKey()): Promise<ListFeedDigestResponse | null> {
@@ -834,6 +903,13 @@ export class DataLoaderManager implements AppModule {
   }
 
   private async runLoadAllData(forceAll: boolean): Promise<void> {
+    // Opt-in only (no-op unless __wmLcpDebug is installed), so this costs one
+    // property read on the ordinary path. It is the only direct witness that a
+    // fan-out actually RAN: e2e/bootstrap-hydration-request-budget.spec.ts's
+    // zero-refetch assertions all presuppose a second pass, and a request
+    // counter cannot distinguish that second pass from a service retry (#7045
+    // U5 review).
+    markLcpDebug('wm:data:load-all-start', { forceAll });
     const runGuarded = async (name: string, fn: () => Promise<void>): Promise<void> => {
       if (this.ctx.isDestroyed || this.ctx.inFlight.has(name)) return;
       this.ctx.inFlight.add(name);
@@ -865,9 +941,12 @@ export class DataLoaderManager implements AppModule {
       if (hasPremiumAccess() && shouldLoad('stock-backtest')) {
         tasks.push({ name: 'stockBacktest', task: () => runGuarded('stockBacktest', () => this.loadStockBacktest()) });
       }
-      if (hasPremiumAccess() && shouldLoad('daily-market-brief')) {
-        tasks.push({ name: 'dailyMarketBrief', task: () => runGuarded('dailyMarketBrief', () => this.loadDailyMarketBrief()) });
-      }
+      // The daily market brief is loaded by the post-hydration pass below
+      // (search for `loadDailyMarketBrief()`), which calls it directly.
+      // loadDailyMarketBrief already self-guards on the shared inFlight set, so
+      // an earlier hydration task that re-locked the same key here always
+      // returned immediately — a guaranteed no-op. Removed (#6770); the direct
+      // post-pass call is the single source of truth.
       if (shouldLoad('polymarket')) {
         tasks.push({ name: 'predictions', task: () => runGuarded('predictions', () => this.loadPredictions()) });
       }
@@ -979,7 +1058,11 @@ export class DataLoaderManager implements AppModule {
     }
 
     if (SITE_VARIANT === 'full' && (shouldLoad('satellite-fires') || this.ctx.mapLayers.natural)) {
-      tasks.push({ name: 'firms', task: () => runGuarded('firms', () => this.loadFirmsData()) });
+      // Lock under the map-layer key ('fires') so a hydration load and a
+      // loadDataForLayer('fires') toggle one-flight each other instead of
+      // double-fetching (loadFirmsData has no internal guard). `name` stays
+      // 'firms' for hydration tiering (#6770).
+      tasks.push({ name: 'firms', task: () => runGuarded('fires', () => this.loadFirmsData()) });
     }
     if (this.ctx.mapLayers.natural) tasks.push({ name: 'natural', task: () => runGuarded('natural', () => this.loadNatural()) });
     if (this.ctx.mapLayers.diseaseOutbreaks || shouldLoad('disease-outbreaks')) tasks.push({ name: 'diseaseOutbreaks', task: () => runGuarded('diseaseOutbreaks', () => this.loadDiseaseOutbreaks()) });
@@ -987,6 +1070,10 @@ export class DataLoaderManager implements AppModule {
     if (hasPremiumAccess() && shouldLoad('wsb-ticker-scanner')) tasks.push({ name: 'wsbTickers', task: () => runGuarded('wsbTickers', () => this.loadWsbTickers()) });
     if (shouldLoad('economic')) tasks.push({ name: 'economicStress', task: () => runGuarded('economicStress', () => this.loadEconomicStress()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.weather) tasks.push({ name: 'weather', task: () => runGuarded('weather', () => this.loadWeatherAlerts()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.canadaRoads) tasks.push({ name: 'canadaRoads', task: () => runGuarded('canadaRoads', () => this.loadCanadaRoads()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.pipelines) tasks.push({ name: 'pipelineRegistries', task: () => runGuarded('pipelineRegistries', () => this.loadPipelineRegistries()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.storageFacilities) tasks.push({ name: 'storageFacilities', task: () => runGuarded('storageFacilities', () => this.loadStorageFacilities()) });
+    if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.canadaAlerts) tasks.push({ name: 'canadaAlerts', task: () => runGuarded('canadaAlerts', () => this.loadCanadaAlerts()) });
     if (SITE_VARIANT !== 'happy' && !isDesktopRuntime() && this.ctx.mapLayers.ais) tasks.push({ name: 'ais', task: () => runGuarded('ais', () => this.loadAisSignals()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.cables) tasks.push({ name: 'cables', task: () => runGuarded('cables', () => this.loadCableActivity()) });
     if (SITE_VARIANT !== 'happy' && this.ctx.mapLayers.cables) tasks.push({ name: 'cableHealth', task: () => runGuarded('cableHealth', () => this.loadCableHealth()) });
@@ -1008,7 +1095,11 @@ export class DataLoaderManager implements AppModule {
       }
     }
     if (SITE_VARIANT !== 'happy' && (shouldLoad('radiation-watch') || this.ctx.mapLayers.radiationWatch)) {
-      tasks.push({ name: 'radiation', task: () => runGuarded('radiation', () => this.loadRadiationWatch()) });
+      // Lock under the map-layer key ('radiationWatch') so a hydration load and
+      // a loadDataForLayer('radiationWatch') toggle one-flight each other
+      // (loadRadiationWatch has no internal guard). `name` stays 'radiation' for
+      // hydration tiering (#6770).
+      tasks.push({ name: 'radiation', task: () => runGuarded('radiationWatch', () => this.loadRadiationWatch()) });
     }
 
     // tech-readiness is only seeded on full + tech variants (api/bootstrap.js +
@@ -1065,6 +1156,18 @@ export class DataLoaderManager implements AppModule {
           break;
         case 'weather':
           await this.loadWeatherAlerts();
+          break;
+        case 'canadaRoads':
+          await this.loadCanadaRoads();
+          break;
+        case 'pipelines':
+          await this.loadPipelineRegistries();
+          break;
+        case 'storageFacilities':
+          await this.loadStorageFacilities();
+          break;
+        case 'canadaAlerts':
+          await this.loadCanadaAlerts();
           break;
         case 'outages':
           await this.loadOutages();
@@ -1902,11 +2005,16 @@ export class DataLoaderManager implements AppModule {
       // their loading skeleton instead of asserting "no active hubs".
       this.ctx.clustersSettled = true;
 
-      const insightsPanel = this.ctx.panels['insights'] as InsightsPanel | undefined;
-      insightsPanel?.updateInsights(this.ctx.latestClusters);
+      // callPanel(), not `panels[key]?.method()`: both panels are deferred, and
+      // on a phone the IntersectionObserver margin is 700px — they are usually
+      // still unmounted shells when this pass completes. An optional-chained
+      // call drops the clustering result on the floor and the panel mounts
+      // minutes later onto its constructor's empty state, permanently (neither
+      // has a scheduled refresh). callPanel() queues instead, and panel-layout
+      // replays on lazy load. Both renders are safe while detached.
+      this.callPanel('insights', 'updateInsights', this.ctx.latestClusters);
       if (isPanelInVariantDefaults('threat-timeline')) {
-        const threatTimelinePanel = this.ctx.panels['threat-timeline'] as ThreatTimelinePanel | undefined;
-        void threatTimelinePanel?.refresh(this.ctx.latestClusters);
+        this.callPanel('threat-timeline', 'refresh', this.ctx.latestClusters);
       }
 
       hydrateGeoHubPanelFromClusters(
@@ -1930,11 +2038,9 @@ export class DataLoaderManager implements AppModule {
       }
     } catch (error) {
       console.error('[App] Clustering failed, clusters unchanged:', error);
-      const insightsPanel = this.ctx.panels['insights'] as InsightsPanel | undefined;
-      insightsPanel?.updateInsights([]);
+      this.callPanel('insights', 'updateInsights', []);
       if (isPanelInVariantDefaults('threat-timeline')) {
-        const threatTimelinePanel = this.ctx.panels['threat-timeline'] as ThreatTimelinePanel | undefined;
-        void threatTimelinePanel?.refresh([]);
+        this.callPanel('threat-timeline', 'refresh', []);
       }
     }
 
@@ -2137,7 +2243,7 @@ export class DataLoaderManager implements AppModule {
       return;
     }
     const {
-      fetchMultipleStocks, fetchCommodityQuotes, fetchSectors, warmCommodityCache, warmSectorCache,
+      fetchMultipleStocks, fetchCommodityQuotes, fetchPhysicalPremiums, fetchSectors, warmCommodityCache, warmSectorCache,
       fetchCrypto, fetchCryptoSectors, fetchDefiTokens, fetchAiTokens, fetchOtherTokens,
     } = marketMod;
     try {
@@ -2341,6 +2447,16 @@ export class DataLoaderManager implements AppModule {
         }
         if (!metalsLoaded) commoditiesPanel?.renderCommodities([]);
         if (!energyLoaded) energyPanel?.updateTape([]);
+      }
+
+      if (commoditiesPanel) {
+        try {
+          const physicalPremiums = await fetchPhysicalPremiums();
+          if (isCurrent()) commoditiesPanel.updatePhysicalPremiums(physicalPremiums);
+        } catch {
+          // The physical comparison is an optional tab; a failure must not
+          // downgrade the existing commodity tape or its provider status.
+        }
       }
 
       // Load ECB FX rates for CommoditiesPanel FX tab
@@ -2552,8 +2668,6 @@ export class DataLoaderManager implements AppModule {
           sentiment: cats.sentiment ? { score: Number(cats.sentiment.score ?? 0) } : undefined,
         };
       }
-      const { MarketServiceClient } = await import('@/generated/client/worldmonitor/market/v1/service_client');
-      const { getRpcBaseUrl } = await import('@/services/rpc-client');
       const client = new MarketServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
       const resp = await client.getFearGreedIndex({});
       if (resp.unavailable || resp.compositeScore <= 0) return undefined;
@@ -2576,8 +2690,6 @@ export class DataLoaderManager implements AppModule {
 
   private async _collectYieldCurveContext(): Promise<YieldCurveContext | undefined> {
     try {
-      const { EconomicServiceClient } = await import('@/generated/client/worldmonitor/economic/v1/service_client');
-      const { getRpcBaseUrl } = await import('@/services/rpc-client');
       const client = new EconomicServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
       const resp = await client.getFredSeriesBatch({ seriesIds: ['DGS2', 'DGS10', 'DGS30'], limit: 1 });
       const lastVal = (id: string): number => {
@@ -2624,20 +2736,18 @@ export class DataLoaderManager implements AppModule {
    * undefined — the brief simply omits the earnings block. */
   private async _collectEarningsContext(): Promise<import('@/services/daily-market-brief').EarningsBriefContext | undefined> {
     try {
-      const { MarketServiceClient } = await import('@/generated/client/worldmonitor/market/v1/service_client');
-      const { getRpcBaseUrl } = await import('@/services/rpc-client');
       const client = new MarketServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
       const today = new Date();
-      const past = new Date(today.getTime() - 7 * 86400_000);
-      const future = new Date(today.getTime() + 14 * 86400_000);
+      const past = addLocalDays(today, -7);
+      const future = addLocalDays(today, 14);
       const resp = await client.listEarningsCalendar({
-        fromDate: past.toISOString().slice(0, 10),
-        toDate: future.toISOString().slice(0, 10),
+        fromDate: localYmd(past),
+        toDate: localYmd(future),
       });
       const earnings = resp.earnings ?? [];
       if (resp.unavailable || earnings.length === 0) return undefined;
       const { buildEarningsBriefContext } = await import('@/services/daily-market-brief');
-      return buildEarningsBriefContext(earnings, today.toISOString().slice(0, 10));
+      return buildEarningsBriefContext(earnings, localYmd(today));
     } catch {
       return undefined;
     }
@@ -2687,7 +2797,7 @@ export class DataLoaderManager implements AppModule {
 
   async loadForecasts(): Promise<void> {
     try {
-      const hydrated = getHydratedData('forecasts') as { predictions?: import('@/generated/client/worldmonitor/forecast/v1/service_client').Forecast[]; generatedAt?: number } | undefined;
+      const hydrated = await ensureHydrated('forecasts') as { predictions?: import('@/generated/client/worldmonitor/forecast/v1/service_client').Forecast[]; generatedAt?: number } | undefined;
       if (hydrated?.predictions?.length) {
         this.callPanel('forecast', 'updateForecasts', hydrated.predictions, {
           generatedAt: hydrated.generatedAt || 0,
@@ -2697,14 +2807,15 @@ export class DataLoaderManager implements AppModule {
         });
         return;
       }
-      const { fetchForecastFeed } = await import('@/services/forecast');
-      const feed = await fetchForecastFeed();
-      this.callPanel('forecast', 'updateForecasts', feed.forecasts, {
-        generatedAt: feed.generatedAt,
-        degraded: feed.degraded,
-        stale: feed.stale,
-        error: feed.error,
+      // The unfiltered dashboard projection is the same shared seed payload.
+      // Keep a public-bootstrap miss from falling through to an origin RPC.
+      this.callPanel('forecast', 'updateForecasts', [], {
+        generatedAt: hydrated?.generatedAt || 0,
+        degraded: false,
+        stale: false,
+        error: 'forecast_bootstrap_unavailable',
       });
+      this.callPanel('forecast', 'showError', t('common.failedToLoad'), () => void this.loadForecasts());
     } catch {
       this.callPanel('forecast', 'updateForecasts', [], {
         generatedAt: 0,
@@ -2712,6 +2823,7 @@ export class DataLoaderManager implements AppModule {
         stale: false,
         error: 'forecast_request_failed',
       });
+      this.callPanel('forecast', 'showError', t('common.failedToLoad'), () => void this.loadForecasts());
     }
   }
 
@@ -2823,6 +2935,67 @@ export class DataLoaderManager implements AppModule {
     }
   }
 
+  async loadPipelineRegistries(options: { refresh?: boolean } = {}): Promise<void> {
+    try {
+      const registries = await ensurePipelineRegistriesHydrated(options);
+      const hasData = Boolean(registries.gas || registries.oil);
+      this.ctx.map?.setLayerReady('pipelines', hasData);
+      this.ctx.map?.render();
+    } catch {
+      this.ctx.map?.setLayerReady('pipelines', false);
+    }
+  }
+
+  async loadStorageFacilities(options: { refresh?: boolean } = {}): Promise<void> {
+    try {
+      const { registry } = await ensureStorageFacilityRegistryHydrated(options);
+      const hasData = Boolean(registry?.facilities && Object.keys(registry.facilities).length > 0);
+      this.ctx.map?.setLayerReady('storageFacilities', hasData);
+      this.ctx.map?.render();
+    } catch {
+      this.ctx.map?.setLayerReady('storageFacilities', false);
+    }
+  }
+
+  async loadCanadaRoads(): Promise<void> {
+    try {
+      const records = await fetchCanadaRoads();
+      const sourceStates = getCanadaRoadSourceStates();
+      const degradedSources = Object.entries(sourceStates)
+        .filter(([, state]) => state === 'unavailable' || state === 'malformed')
+        .map(([key]) => key);
+      this.ctx.map?.setCanadaRoads(records);
+      this.ctx.map?.setLayerReady('canadaRoads', records.length > 0);
+      this.ctx.statusPanel?.updateFeed('Canada Roads', {
+        status: degradedSources.length > 0 ? 'warning' : 'ok',
+        itemCount: records.length,
+        errorMessage: degradedSources.length > 0
+          ? `Partial coverage: ${degradedSources.join(', ')}`
+          : undefined,
+      });
+      // Per source, not one blanket ontario_511. Four feeds union onto this
+      // layer, and attributing all of them to Ontario meant an Alberta, Toronto
+      // or BC outage either read as an Ontario failure or — for the two with no
+      // id at all — never reached the freshness panel. getCanadaRoadSourceStates
+      // already knows which one is degraded; this just stops discarding it.
+      for (const { key, freshnessId } of CANADA_ROAD_FRESHNESS_IDS) {
+        const state = sourceStates[key];
+        if (state === 'unavailable' || state === 'malformed') {
+          dataFreshness.recordError(freshnessId, `${key}: ${state}`);
+        } else {
+          dataFreshness.recordUpdate(freshnessId, records.length);
+        }
+      }
+    } catch (error) {
+      this.ctx.map?.setLayerReady('canadaRoads', false);
+      this.ctx.statusPanel?.updateFeed('Canada Roads', { status: 'error' });
+      // The whole fetch failed, so every source is unknown — not just Ontario.
+      for (const { freshnessId } of CANADA_ROAD_FRESHNESS_IDS) {
+        dataFreshness.recordError(freshnessId, String(error));
+      }
+    }
+  }
+
   async loadWeatherAlerts(): Promise<void> {
     try {
       const alerts = await fetchWeatherAlerts();
@@ -2834,6 +3007,18 @@ export class DataLoaderManager implements AppModule {
       this.ctx.map?.setLayerReady('weather', false);
       this.ctx.statusPanel?.updateFeed('Weather', { status: 'error' });
       dataFreshness.recordError('weather', String(error));
+    }
+  }
+
+  async loadCanadaAlerts(): Promise<void> {
+    try {
+      const alerts = await fetchCanadaAlerts();
+      this.ctx.map?.setCanadaAlerts(alerts);
+      this.ctx.map?.setLayerReady('canadaAlerts', alerts.length > 0);
+      this.ctx.statusPanel?.updateFeed('Canada alerts', { status: 'ok', itemCount: alerts.length });
+    } catch (error) {
+      this.ctx.map?.setLayerReady('canadaAlerts', false);
+      this.ctx.statusPanel?.updateFeed('Canada alerts', { status: 'error' });
     }
   }
 
@@ -3064,6 +3249,10 @@ export class DataLoaderManager implements AppModule {
     // Telegram Intel (premium-locked on desktop without API key)
     if (!_desktopLocked) {
       tasks.push(this.loadTelegramIntel());
+    }
+
+    if (!_desktopLocked) {
+      tasks.push(this.loadXIntel());
     }
 
     // OREF sirens (premium-locked on desktop without API key)
@@ -3674,47 +3863,110 @@ export class DataLoaderManager implements AppModule {
     }
   }
 
-  async loadGlobalTenders(filters?: GlobalTenderFilters, append = false): Promise<void> {
+  async loadGlobalTenders(filters?: GlobalTenderFilters, append = false, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
     const procurementPanel = this.ctx.panels['global-procurement'] as GlobalProcurementPanel | undefined;
     if (!procurementPanel) return;
+    if (
+      filters === undefined
+      && signal === undefined
+      && this.activeGlobalTenderScopedGeneration !== null
+    ) return;
     const requestGeneration = ++this.globalTenderGeneration;
+    this.activeGlobalTenderScopedGeneration = signal ? requestGeneration : null;
+    const previousGlobalTenderFilters = { ...this.globalTenderFilters };
     const requestFilters = filters ?? this.globalTenderFilters;
     this.globalTenderFilters = { ...requestFilters, cursor: '' };
-    procurementPanel.setRequestHandler((nextFilters, shouldAppend) => {
-      void this.loadGlobalTenders(nextFilters, shouldAppend);
-    });
-    if (!hasPremiumAccess()) {
-      procurementPanel?.clear();
-      return;
-    }
-    procurementPanel.setLoading(true, append);
+    let canceledFiltersRestored = false;
+    const releaseScopedRequest = () => {
+      if (this.activeGlobalTenderScopedGeneration === requestGeneration) {
+        this.activeGlobalTenderScopedGeneration = null;
+      }
+    };
+    const restoreCanceledFilters = () => {
+      if (
+        canceledFiltersRestored
+        || signal?.aborted !== true
+        || requestGeneration !== this.globalTenderGeneration
+      ) return;
+      canceledFiltersRestored = true;
+      this.globalTenderFilters = previousGlobalTenderFilters;
+    };
+    signal?.addEventListener('abort', () => {
+      restoreCanceledFilters();
+      releaseScopedRequest();
+    }, { once: true });
+    const isCanceledOrStale = () => {
+      restoreCanceledFilters();
+      return signal?.aborted === true || requestGeneration !== this.globalTenderGeneration;
+    };
     try {
-      const { fetchGlobalTenders } = await import('@/services/global-tenders');
-      const data = await fetchGlobalTenders(requestFilters);
-      if (requestGeneration !== this.globalTenderGeneration) return;
+      procurementPanel.setRequestHandler((nextFilters, shouldAppend, requestSignal) => {
+        return this.loadGlobalTenders(nextFilters, shouldAppend, requestSignal);
+      });
       if (!hasPremiumAccess()) {
+        if (isCanceledOrStale()) return;
         procurementPanel.clear();
         return;
       }
-      procurementPanel.update(data, append);
-      this.ctx.statusPanel?.updateApi('Global Procurement', {
-        status: !data.dataAvailable ? 'error' : ['partial', 'stale'].includes(data.availability) ? 'warning' : 'ok',
-      });
-    } catch (error) {
-      if (requestGeneration !== this.globalTenderGeneration || !hasPremiumAccess()) return;
-      console.warn('[App] Global tenders failed:', error);
-      procurementPanel.showUnavailable();
-      this.ctx.statusPanel?.updateApi('Global Procurement', { status: 'error' });
+      if (isCanceledOrStale()) return;
+      procurementPanel.setLoading(true, append);
+      try {
+        const { fetchGlobalTenders } = await import('@/services/global-tenders');
+        if (isCanceledOrStale()) return;
+        const data = await fetchGlobalTenders(requestFilters, signal);
+        if (isCanceledOrStale()) return;
+        if (!hasPremiumAccess()) {
+          if (isCanceledOrStale()) return;
+          procurementPanel.clear();
+          return;
+        }
+        if (isCanceledOrStale()) return;
+        procurementPanel.update(data, append);
+        if (isCanceledOrStale()) return;
+        this.ctx.statusPanel?.updateApi('Global Procurement', {
+          status: !data.dataAvailable ? 'error' : ['partial', 'stale'].includes(data.availability) ? 'warning' : 'ok',
+        });
+      } catch (error) {
+        if (isCanceledOrStale() || !hasPremiumAccess()) return;
+        console.warn('[App] Global tenders failed:', error);
+        if (isCanceledOrStale()) return;
+        procurementPanel.showUnavailable();
+        if (isCanceledOrStale()) return;
+        this.ctx.statusPanel?.updateApi('Global Procurement', { status: 'error' });
+      }
+    } finally {
+      releaseScopedRequest();
     }
   }
 
   async clearGlobalTenders(): Promise<void> {
     this.globalTenderGeneration += 1;
+    this.activeGlobalTenderScopedGeneration = null;
     this.globalTenderFilters = {};
     const procurementPanel = this.ctx.panels['global-procurement'] as GlobalProcurementPanel | undefined;
     procurementPanel?.clear();
-    const { clearGlobalTenderCache } = await import('@/services/global-tenders');
-    clearGlobalTenderCache();
+    // The only call site is fire-and-forget — `void this.dataLoader
+    // .clearGlobalTenders()` in App.ts on the premium->free transition — so an
+    // unguarded rejection here does not degrade one panel, it lands as an
+    // unhandled rejection (WORLDMONITOR-100, reported by Sentry with mechanism
+    // `onunhandledrejection`).
+    //
+    // Swallowing does NOT weaken the "Pro data must not survive a downgrade"
+    // guarantee this method exists to enforce. Everything user-visible — the
+    // generation bump, the filter reset, the panel clear — already ran above,
+    // synchronously, before the import. And the cache this clears lives on the
+    // module's own `tenderBreaker` (`persistCache: false`, so in-memory only):
+    // if the import fails the module never evaluated in this page, so there is
+    // no breaker and no cached Pro data to clear; if it ever did evaluate, the
+    // specifier resolves from the module registry and cannot fail. A failure
+    // here therefore implies an empty cache, not an unclearable one.
+    try {
+      const { clearGlobalTenderCache } = await import('@/services/global-tenders');
+      clearGlobalTenderCache();
+    } catch (e) {
+      console.warn('[App] Global tender cache clear failed:', e);
+    }
   }
 
   async loadBisData(): Promise<void> {
@@ -3822,24 +4074,27 @@ export class DataLoaderManager implements AppModule {
 
     try {
       const {
-        fetchShippingRates, fetchChokepointStatus, fetchCriticalMinerals, fetchShippingStress,
+        fetchShippingRates, fetchChokepointStatus, fetchCriticalMinerals, fetchMineralProduction, fetchShippingStress,
       } = await import('@/services/supply-chain');
-      const [shipping, chokepoints, minerals, stress] = await Promise.allSettled([
+      const [shipping, chokepoints, minerals, mineralProduction, stress] = await Promise.allSettled([
         fetchShippingRates(),
         fetchChokepointStatus(),
         fetchCriticalMinerals(),
+        fetchMineralProduction(),
         fetchShippingStress(),
       ]);
 
       const shippingData = shipping.status === 'fulfilled' ? shipping.value : null;
       const chokepointData = chokepoints.status === 'fulfilled' ? chokepoints.value : null;
       const mineralsData = minerals.status === 'fulfilled' ? minerals.value : null;
+      const mineralProductionData = mineralProduction.status === 'fulfilled' ? mineralProduction.value : null;
       const stressData = stress.status === 'fulfilled' ? stress.value : null;
 
       if (shippingData) scPanel.updateShippingRates(shippingData);
       if (chokepointData) scPanel.updateChokepointStatus(chokepointData);
       if (chokepointData) this.ctx.map?.setChokepointData(chokepointData);
       if (mineralsData) scPanel.updateCriticalMinerals(mineralsData);
+      if (mineralProductionData) scPanel.updateMineralProduction(mineralProductionData);
       if (stressData) scPanel.updateShippingStress(stressData);
 
       const totalItems = (shippingData?.indices.length || 0) + (chokepointData?.chokepoints.length || 0) + (mineralsData?.minerals.length || 0);
@@ -3937,7 +4192,6 @@ export class DataLoaderManager implements AppModule {
         return;
       }
 
-      const { EconomicServiceClient } = await import('@/generated/client/worldmonitor/economic/v1/service_client');
       const client = new EconomicServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
       const resp = await client.getEconomicStress({});
       if (!resp.unavailable && Number.isFinite(resp.compositeScore)) {
@@ -3949,8 +4203,14 @@ export class DataLoaderManager implements AppModule {
   }
 
   updateMonitorResults(): void {
-    const monitorPanel = this.ctx.panels['monitors'] as MonitorPanel | undefined;
-    monitorPanel?.renderResults(this.ctx.allNews);
+    // Queued, for the same reason as the cluster fan-out above: the boot call
+    // site is inside loadNews, which runs ONCE per work-list signature. Monitors
+    // is an opt-in panel, so it is always enabled mid-session and always mounts
+    // after that pass — an optional-chained call left its results area blank,
+    // which reads as "your keywords matched nothing" rather than as a panel that
+    // never got the news. The other two call sites (monitor edited, monitors
+    // list changed) run with the panel mounted and take callPanel's direct path.
+    this.callPanel('monitors', 'renderResults', this.ctx.allNews);
   }
 
   // Lazy-load the tech-activity service (→ tech-hub-index → the ~62KB tech-geo
@@ -4013,7 +4273,9 @@ export class DataLoaderManager implements AppModule {
     try {
       const fireResult = await fetchAllFires(1);
       if (fireResult.skipped) {
-        this.ctx.panels['satellite-fires']?.showConfigError(t('panels.satelliteFires.noData'));
+        // en.json carries panels.satelliteFires as a flat title string, so the
+        // nested .noData lookup could never resolve — it rendered the raw key.
+        this.ctx.panels['satellite-fires']?.showConfigError(t('common.noData'));
         this.ctx.statusPanel?.updateApi('FIRMS', { status: 'error' });
         return;
       }
@@ -4340,6 +4602,56 @@ export class DataLoaderManager implements AppModule {
       this.callPanel('telegram-intel', 'setData', {
         source: 'telegram', enabled: false, count: 0, updatedAt: null, items: [],
       });
+    }
+  }
+
+  async loadXIntel(): Promise<void> {
+    if (isDesktopRuntime() && !hasPremiumAccess()) return;
+    // `xFeed` is intentionally NOT a bootstrap tier key (R4, #6654): its items
+    // carry post bodies, and every tier is served unauthenticated at
+    // `?tier=<t>&public=1` with ACAO:*. So this read is inert today and always
+    // returns undefined — the panel gets its data from the fetch below.
+    // Deliberately kept rather than deleted: it is the hydrated-else-fetch
+    // fallback the DOM tests in tests/dom/x-intel-data-loader.test.mts exercise,
+    // and it is what would resume working if the key is ever re-registered with
+    // `text` stripped on the bootstrap path. Note the bootstrap coverage guards
+    // in tests/bootstrap.test.mjs only run key -> consumer, so nothing flags a
+    // consumer whose key is absent.
+    const hydrated = getHydratedData('xFeed') as import('@/services/x-intel').XFeedResponse | undefined;
+    const hydratedUsable = isUsableHydratedXFeed(hydrated);
+    if (hydratedUsable && !this.ctx.isDestroyed) {
+      this.callPanel('x-intel', 'setData', hydrated);
+    }
+    const controller = new AbortController();
+    this.xIntelAbortController?.abort();
+    this.xIntelAbortController = controller;
+    try {
+      const result = await fetchXFeed(50, controller.signal);
+      if (controller.signal.aborted || this.ctx.isDestroyed) return;
+      this.callPanel('x-intel', 'setData', result);
+      this.xIntelHasLiveData = true;
+    } catch (error) {
+      if (controller.signal.aborted || this.ctx.isDestroyed) return;
+      console.error('[App] X news-account fetch failed:', error);
+      if (hydratedUsable) return;
+      // A transport failure is NOT `enabled: false`. That sentinel means "the
+      // relay has no X credentials", and reusing it here rendered the permanent
+      // "disabled" copy over a panel that was showing good posts a moment
+      // earlier. With hydration now intentionally absent (xFeed is not a
+      // bootstrap key, R4), `hydratedUsable` is always false, so every transient
+      // 502 hit this path.
+      //
+      // Once a live fetch has succeeded, keep that render: the panel refreshes
+      // every 15 min, so one failed poll should not blank it. Note showError
+      // also calls replaceContent, so it is NOT a "keep what's on screen" path —
+      // hence the explicit early return rather than falling through to it.
+      if (this.xIntelHasLiveData) return;
+      // Nothing good on screen yet (first load, or only expired hydration we
+      // deliberately refused to render): surface the failure rather than leave a
+      // stuck loading state.
+      this.callPanel('x-intel', 'showError');
+    } finally {
+      if (this.xIntelAbortController === controller) this.xIntelAbortController = null;
     }
   }
 

@@ -172,8 +172,9 @@ export class StockAnalysisPanel extends Panel {
     // Keep the intro in sync with current item count + skipped-symbol
     // note even as the table view persists across refreshes.
     this.tableView.updateIntro(this.buildIntro(this.lastItems.length));
-    this.setSafeContent(unsafeRawHtml(this.tableView.render(), 'legacy Panel.setContent() migration'));
-    this.tableView.bind(this.content, () => this.rerender());
+    this.setSafeContent(unsafeRawHtml(this.tableView.render(), 'legacy Panel.setContent() migration'), () => {
+      this.tableView?.bind(this.content, () => this.rerender());
+    });
   }
 
   private buildIntro(itemCount: number): string {
@@ -247,7 +248,10 @@ export class StockAnalysisPanel extends Panel {
       const href = sanitizeUrl(headline.link);
       const title = escapeHtml(headline.title);
       const source = escapeHtml(headline.source || 'Source');
-      return `<a href="${href}" target="_blank" rel="noreferrer" style="display:block;color:var(--text);text-decoration:none;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02)"><div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.45">${title}</div><div style="margin-top:4px;font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">${source}</div></a>`;
+      const alignment = headline.alignedTradingDate
+        ? ` · aligned ${escapeHtml(headline.alignedTradingDate)}${headline.marketSessionAtPublish ? ` (${escapeHtml(headline.marketSessionAtPublish)})` : ''}`
+        : '';
+      return `<a href="${href}" target="_blank" rel="noreferrer" style="display:block;color:var(--text);text-decoration:none;padding:8px 10px;border:1px solid var(--border);background:rgba(255,255,255,0.02)"><div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.45">${title}</div><div style="margin-top:4px;font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">${source}${alignment}</div></a>`;
     }).join('');
 
     return `
@@ -278,7 +282,7 @@ export class StockAnalysisPanel extends Panel {
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">MA5 Bias</div><div style="margin-top:4px">${escapeHtml(formatChange(item.biasMa5))}</div></div>
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">RSI 12</div><div style="margin-top:4px">${escapeHtml(item.rsi12.toFixed(1))}</div></div>
           <div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">Volume</div><div style="margin-top:4px">${escapeHtml(item.volumeStatus)}</div></div>
-          ${item.newsSentiment != null ? `<div style="border:1px solid var(--border);padding:8px"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">News</div><div style="margin-top:4px">${escapeHtml(formatNewsSentiment(item.newsSentiment))}</div></div>` : ''}
+          ${item.newsSentiment != null ? `<div style="border:1px solid var(--border);padding:8px" data-news-overlay="model"><div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em">News overlay</div><div style="margin-top:4px">${escapeHtml(formatNewsSentiment(item.newsSentiment))}</div></div>` : ''}
         </div>
         ${this.renderDividendProfile(item)}
         <div style="font-size:calc(12px * var(--wm-panel-effective-scale, 1));line-height:1.55;color:var(--text)"><strong style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim)">Action</strong><div style="margin-top:4px">${escapeHtml(getStockAnalysisRatingAction(item))}</div></div>
@@ -486,11 +490,11 @@ export class StockAnalysisPanel extends Panel {
       <table style="width:100%;border-collapse:collapse;font-size:calc(11px * var(--wm-panel-effective-scale, 1));margin-top:6px">
         <thead>
           <tr style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;text-align:left">
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Name</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Type</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Shares</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Value</th>
-            <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Date</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Name</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Type</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Shares</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right">Value</th>
+            <th scope="col" style="padding:4px 6px;border-bottom:1px solid var(--border)">Date</th>
           </tr>
         </thead>
         <tbody>
