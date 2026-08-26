@@ -1534,7 +1534,11 @@
       "actors": "행위자",
       "deathsCount": "사망자 {{count}}명",
       "moreNotShown": "{{count}}건의 추가 사건 미표시",
-      "infoTooltip": "<strong>UCDP 지리참조 사건</strong> 웁살라 대학교의 사건 수준 분쟁 데이터.<ul><li><strong>국가 기반</strong>: 정부 대 반군</li><li><strong>비국가</strong>: 무장 단체 대 무장 단체</li><li><strong>일방적</strong>: 민간인 대상 폭력</li></ul>사망자는 최선 추정치(하한-상한 범위)로 표시. ACLED 중복은 자동으로 필터링됩니다."
+      "infoTooltip": "<strong>UCDP 지리참조 사건</strong> 웁살라 대학교의 사건 수준 분쟁 데이터.<ul><li><strong>국가 기반</strong>: 정부 대 반군</li><li><strong>비국가</strong>: 무장 단체 대 무장 단체</li><li><strong>일방적</strong>: 민간인 대상 폭력</li></ul>사망자는 최선 추정치(하한-상한 범위)로 표시. ACLED 중복은 자동으로 필터링됩니다.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "활동 지수",

@@ -1534,7 +1534,11 @@
       "actors": "Актори",
       "deathsCount": "{{count}} смъртни случаи",
       "moreNotShown": "{{count}} повече събития не е показано",
-      "infoTooltip": "<strong>События на въоръжени конфликти</strong> Дадени на ниво събитие от Uppsala университет (UCDP).<ul><li><strong>Базиран на държава</strong>: правителство срещу бунтовническа група</li><li><strong>Не-държава</strong>: въоръжена група срещу въоръжена група</li><li><strong>Едностранен</strong>: насилие срещу цивилни</li></ul>Смъртни случаи показани като най-добра оценка (низ-висок диапазон). ACLED дубликати се филтрират автоматично."
+      "infoTooltip": "<strong>События на въоръжени конфликти</strong> Дадени на ниво събитие от Uppsala университет (UCDP).<ul><li><strong>Базиран на държава</strong>: правителство срещу бунтовническа група</li><li><strong>Не-държава</strong>: въоръжена група срещу въоръжена група</li><li><strong>Едностранен</strong>: насилие срещу цивилни</li></ul>Смъртни случаи показани като най-добра оценка (низ-висок диапазон). ACLED дубликати се филтрират автоматично.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Индекс на активност",

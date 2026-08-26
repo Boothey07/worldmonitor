@@ -1534,7 +1534,11 @@
       "actors": "ผู้กระทำ",
       "deathsCount": "{{count}} ผู้เสียชีวิต",
       "moreNotShown": "อีก {{count}} เหตุการณ์ที่ไม่แสดง",
-      "infoTooltip": "<strong>เหตุการณ์อ้างอิงทางภูมิศาสตร์ UCDP</strong> ข้อมูลความขัดแย้งระดับเหตุการณ์จากมหาวิทยาลัย Uppsala<ul><li><strong>ระหว่างรัฐ</strong>: รัฐบาล vs กลุ่มกบฏ</li><li><strong>นอกรัฐ</strong>: กลุ่มติดอาวุธ vs กลุ่มติดอาวุธ</li><li><strong>ฝ่ายเดียว</strong>: ความรุนแรงต่อพลเรือน</li></ul>จำนวนผู้เสียชีวิตแสดงเป็นค่าประมาณที่ดีที่สุด (ช่วงต่ำ-สูง) รายการซ้ำกับ ACLED ถูกกรองออกอัตโนมัติ"
+      "infoTooltip": "<strong>เหตุการณ์อ้างอิงทางภูมิศาสตร์ UCDP</strong> ข้อมูลความขัดแย้งระดับเหตุการณ์จากมหาวิทยาลัย Uppsala<ul><li><strong>ระหว่างรัฐ</strong>: รัฐบาล vs กลุ่มกบฏ</li><li><strong>นอกรัฐ</strong>: กลุ่มติดอาวุธ vs กลุ่มติดอาวุธ</li><li><strong>ฝ่ายเดียว</strong>: ความรุนแรงต่อพลเรือน</li></ul>จำนวนผู้เสียชีวิตแสดงเป็นค่าประมาณที่ดีที่สุด (ช่วงต่ำ-สูง) รายการซ้ำกับ ACLED ถูกกรองออกอัตโนมัติ",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "ดัชนีกิจกรรม",

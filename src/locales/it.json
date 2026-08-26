@@ -1553,7 +1553,11 @@
       "actors": "Attori",
       "deathsCount": "{{count}} morti",
       "moreNotShown": "{{count}} eventi aggiuntivi non mostrati",
-      "infoTooltip": "<strong>Eventi georeferenziati UCDP</strong> Dati sui conflitti a livello di evento provenienti dall'Università di Uppsala.<ul><li><strong>A livello statale</strong>: Governo vs gruppo ribelle</li><li><strong>Non statale</strong>: Gruppo armato vs gruppo armato gruppo__PH_4<li><strong>Unilaterale</strong>: violenza contro i civili</li></ul>Decessi indicati come migliore stima (intervallo basso-alto). I duplicati ACLED vengono filtrati automaticamente."
+      "infoTooltip": "<strong>Eventi georeferenziati UCDP</strong> Dati sui conflitti a livello di evento provenienti dall'Università di Uppsala.<ul><li><strong>A livello statale</strong>: Governo vs gruppo ribelle</li><li><strong>Non statale</strong>: Gruppo armato vs gruppo armato gruppo__PH_4<li><strong>Unilaterale</strong>: violenza contro i civili</li></ul>Decessi indicati come migliore stima (intervallo basso-alto). I duplicati ACLED vengono filtrati automaticamente.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "strategicRisk": {
       "noRisks": "Nessun rischio significativo rilevato",

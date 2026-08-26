@@ -1472,7 +1472,11 @@
       "actors": "Aktorzy",
       "deathsCount": "{{count}} zgonów",
       "moreNotShown": "{{count}} kolejnych zdarzeń nie wyświetlono",
-      "infoTooltip": "<strong>UCDP Zdarzenia z georeferencją</strong> Dane dotyczące konfliktów na poziomie zdarzenia z Uniwersytetu w Uppsali.<ul><li><strong>Oparte na państwie</strong>: Rząd kontra grupa rebeliantów</li><li><strong>Niepaństwowe</strong>: Grupa zbrojna kontra grupa zbrojna grupa</li><li><strong>Jednostronna</strong>: Przemoc wobec ludności cywilnej</li></ul>Śmiertelność pokazana jako najlepsze szacunki (od niskiego do wysokiego zakresu). Duplikaty ACLED są odfiltrowywane automatycznie."
+      "infoTooltip": "<strong>UCDP Zdarzenia z georeferencją</strong> Dane dotyczące konfliktów na poziomie zdarzenia z Uniwersytetu w Uppsali.<ul><li><strong>Oparte na państwie</strong>: Rząd kontra grupa rebeliantów</li><li><strong>Niepaństwowe</strong>: Grupa zbrojna kontra grupa zbrojna grupa</li><li><strong>Jednostronna</strong>: Przemoc wobec ludności cywilnej</li></ul>Śmiertelność pokazana jako najlepsze szacunki (od niskiego do wysokiego zakresu). Duplikaty ACLED są odfiltrowywane automatycznie.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "strategicRisk": {
       "noRisks": "Nie wykryto istotnych zagrożeń",

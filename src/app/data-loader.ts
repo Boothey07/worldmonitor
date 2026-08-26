@@ -2901,7 +2901,16 @@ export class DataLoaderManager implements AppModule {
         const conflictData = await fetchConflictEvents();
         this.ctx.intelligenceCache.conflicts = conflictData.events;
         ingestConflictsForCountryData(conflictData.events);
-        if (conflictData.count > 0) dataFreshness.recordUpdate('acled_conflict', conflictData.count);
+        // recordUpdate only on real records; an answered-but-empty ACLED must not
+        // refresh the freshness clock as if the source had reported.
+        if (conflictData.outcome.status === 'records') {
+          dataFreshness.recordUpdate('acled_conflict', conflictData.outcome.count);
+        } else {
+          dataFreshness.recordError(
+            'acled_conflict',
+            conflictData.outcome.status === 'empty' ? 'ACLED answered with no events' : 'ACLED unavailable',
+          );
+        }
       } catch (error) {
         console.error('[Intelligence] Conflict events fetch failed:', error);
         dataFreshness.recordError('acled_conflict', String(error));
@@ -2976,6 +2985,7 @@ export class DataLoaderManager implements AppModule {
         // and returns the full set.
         const wantsFullUcdpSet = this.ctx.mapLayers.ucdpEvents;
         const result = await fetchUcdpEvents(wantsFullUcdpSet ? undefined : hydratedUcdp);
+        (this.ctx.panels['ucdp-events'] as UcdpEventsPanel | undefined)?.setOutcome?.(result.outcome);
         if (!result.success) {
           // listUcdpEvents is a pure Redis-read (gold standard). Retrying returns
           // the same empty result until the Railway seed refreshes the key.

@@ -1157,7 +1157,11 @@
       "actors": "Aktörer",
       "deathsCount": "{{count}} dödsfall",
       "moreNotShown": "{{count}} fler händelser visas inte",
-      "infoTooltip": "<strong>UCDP Georefererade händelser</strong> Konfliktdata på händelsenivå från Uppsala universitet.<ul>PH_3__<strong>Statsbaserad</strong>: Regering vs rebellgrupp</li><li><strong>Icke-statlig</strong>: Beväpnad grupp vs beväpnad group</li><li><strong>Ensidig</strong>: Våld mot civila</li></ul>Dödsfall visas som bästa uppskattning (lågt högt intervall). ACLED-dubbletter filtreras bort automatiskt."
+      "infoTooltip": "<strong>UCDP Georefererade händelser</strong> Konfliktdata på händelsenivå från Uppsala universitet.<ul>PH_3__<strong>Statsbaserad</strong>: Regering vs rebellgrupp</li><li><strong>Icke-statlig</strong>: Beväpnad grupp vs beväpnad group</li><li><strong>Ensidig</strong>: Våld mot civila</li></ul>Dödsfall visas som bästa uppskattning (lågt högt intervall). ACLED-dubbletter filtreras bort automatiskt.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "strategicRisk": {
       "infoTooltip": "<strong>Metodik</strong> Sammansatt poäng (0-100) blandning:<ul><li>50 % Landinstabilitet (topp 5 viktade)</li><li>30% Geografiska konvergenszoner</li><li>20% infrastrukturincidenter PH_5______4 minuter PH_5____upps.",

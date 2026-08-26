@@ -1462,7 +1462,11 @@
       "actors": "Acteurs",
       "deathsCount": "{{count}} décès",
       "moreNotShown": "{{count}} événements supplémentaires non affichés",
-      "infoTooltip": "<strong>Événements géoréférencés UCDP</strong> Données de conflit au niveau des événements de l'Université d'Uppsala.<ul><li><strong>États</strong> : gouvernement contre groupe rebelle</li><li><strong>Non étatique</strong> : groupe armé contre groupe armé</li><li><strong>Unilatéral</strong> : Violence contre les civils</li></ul>Décès indiqués comme meilleure estimation (fourchette basse-haute). Les doublons ACLED sont automatiquement filtrés."
+      "infoTooltip": "<strong>Événements géoréférencés UCDP</strong> Données de conflit au niveau des événements de l'Université d'Uppsala.<ul><li><strong>États</strong> : gouvernement contre groupe rebelle</li><li><strong>Non étatique</strong> : groupe armé contre groupe armé</li><li><strong>Unilatéral</strong> : Violence contre les civils</li></ul>Décès indiqués comme meilleure estimation (fourchette basse-haute). Les doublons ACLED sont automatiquement filtrés.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "displacement": {
       "refugees": "Réfugiés",

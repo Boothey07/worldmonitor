@@ -3,6 +3,7 @@ import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 import type { UcdpGeoEvent, UcdpEventType } from '@/types';
 import { t } from '@/services/i18n';
 import type { UcdpTabAggregate } from '@/services/conflict';
+import { recordingLagDays, type ConflictSourceOutcome } from '@/services/conflict/provenance';
 
 // The panel's tabs are the three UCDP violence types. The projection keys its
 // aggregates by the proto enum, so map between them in exactly one place.
@@ -20,6 +21,7 @@ function totalFromAggregates(aggregates: Record<string, UcdpTabAggregate>): numb
 export class UcdpEventsPanel extends Panel {
   private events: UcdpGeoEvent[] = [];
   private aggregates?: Record<string, UcdpTabAggregate>;
+  private outcome?: ConflictSourceOutcome;
   private hasLoadedEvents = false;
   private activeTab: UcdpEventType = 'state-based';
   private onEventClick?: (lat: number, lon: number) => void;
@@ -62,12 +64,24 @@ export class UcdpEventsPanel extends Panel {
    * silently under-report them. When the caller has the full set (the RPC path, or
    * the map layer being on) it passes no aggregates and we compute as before.
    */
-  public setEvents(events: UcdpGeoEvent[], aggregates?: Record<string, UcdpTabAggregate>): void {
+  public setEvents(events: UcdpGeoEvent[], aggregates?: Record<string, UcdpTabAggregate>, outcome?: ConflictSourceOutcome): void {
     this.events = events;
     this.aggregates = aggregates;
+    this.outcome = outcome;
     this.hasLoadedEvents = true;
     this.setCount(aggregates ? totalFromAggregates(aggregates) : events.length);
     this.renderContent();
+  }
+
+  /**
+   * Provenance from the last fetch — see ConflictSourceOutcome. Separate from
+   * setEvents because the hydrated bootstrap path can carry an outcome without
+   * new rows, and because a failed refetch must be able to update the footer
+   * while the previous rows stay on screen.
+   */
+  public setOutcome(outcome: ConflictSourceOutcome): void {
+    this.outcome = outcome;
+    if (this.hasLoadedEvents) this.renderContent();
   }
 
   public hasData(): boolean {
@@ -150,6 +164,22 @@ export class UcdpEventsPanel extends Panel {
       ? `<div class="panel-more">${t('components.ucdpEvents.moreNotShown', { count: filtered.length - 50 })}</div>`
       : '';
 
+    // Provenance line. The count above sums records of very different currency:
+    // without it, "2,000" invites the reader to assume it is all current. Mirrors
+    // ConflictLayerData.coverageNote() in the iOS client — including the rule that
+    // it renders whenever we have an answer at all, because UNDATED/EMPTY are
+    // findings too, not rendering failures.
+    let provenanceHtml = '';
+    if (this.outcome) {
+      const lag = recordingLagDays(this.outcome.freshestMs);
+      const key = this.outcome.status === 'records'
+        ? (lag !== undefined ? 'components.ucdpEvents.provenanceRecords' : 'components.ucdpEvents.provenanceUndated')
+        : this.outcome.status === 'empty'
+          ? 'components.ucdpEvents.provenanceEmpty'
+          : 'components.ucdpEvents.provenanceUnavailable';
+      provenanceHtml = `<div class="ucdp-provenance">${t(key, { lag: lag ?? 0 })}</div>`;
+    }
+
     this.setSafeContent(unsafeRawHtml(`
       <div class="ucdp-panel-content">
         <div class="ucdp-header">
@@ -158,6 +188,7 @@ export class UcdpEventsPanel extends Panel {
         </div>
         ${bodyHtml}
         ${moreHtml}
+        ${provenanceHtml}
       </div>
     `, 'legacy Panel.setContent() migration'));
   }

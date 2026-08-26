@@ -1534,7 +1534,11 @@
       "actors": "行为方",
       "deathsCount": "{{count}}人死亡",
       "moreNotShown": "还有{{count}}个事件未显示",
-      "infoTooltip": "<strong>UCDP地理参考事件</strong>来自乌普萨拉大学的事件级冲突数据。<ul><li><strong>国家冲突</strong>：政府与反政府武装</li><li><strong>非国家冲突</strong>：武装团体之间</li><li><strong>单方暴力</strong>：针对平民的暴力</li></ul>死亡人数显示为最佳估计（低-高范围）。ACLED重复数据已自动过滤。"
+      "infoTooltip": "<strong>UCDP地理参考事件</strong>来自乌普萨拉大学的事件级冲突数据。<ul><li><strong>国家冲突</strong>：政府与反政府武装</li><li><strong>非国家冲突</strong>：武装团体之间</li><li><strong>单方暴力</strong>：针对平民的暴力</li></ul>死亡人数显示为最佳估计（低-高范围）。ACLED重复数据已自动过滤。",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "活动指数",

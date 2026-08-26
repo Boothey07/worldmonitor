@@ -1108,6 +1108,15 @@
   font-size: calc(10px * var(--wm-panel-effective-scale, 1));
 }
 
+/* Provenance footer on the UCDP events panel: recording lag / empty / unreachable.
+   Faint by design — context, not alarm; it must not read as an error banner. */
+.ucdp-provenance {
+  color: var(--text-faint);
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  font-variant-numeric: tabular-nums;
+  padding: 2px 0 0;
+}
+
 .ucdp-actors {
   max-width: 180px;
   overflow: hidden;

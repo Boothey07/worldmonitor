@@ -1157,7 +1157,11 @@
       "actors": "Actoren",
       "deathsCount": "{{count}} doden",
       "moreNotShown": "{{count}} meer gebeurtenissen niet getoond",
-      "infoTooltip": "<strong>UCDP-gegeorefereerde gebeurtenissen</strong> Conflictgegevens op gebeurtenisniveau van de universiteit van Uppsala.<ul><li><strong>State-based</strong>: regering versus rebellengroep</li><li><strong>Niet-statelijke </strong>: gewapende groep versus gewapende groep groep</li><li><strong>Eenzijdig</strong>: Geweld tegen burgers</li></ul>Doden weergegeven als beste schatting (laag-hoog bereik). ACLED-duplicaten worden automatisch uitgefilterd."
+      "infoTooltip": "<strong>UCDP-gegeorefereerde gebeurtenissen</strong> Conflictgegevens op gebeurtenisniveau van de universiteit van Uppsala.<ul><li><strong>State-based</strong>: regering versus rebellengroep</li><li><strong>Niet-statelijke </strong>: gewapende groep versus gewapende groep groep</li><li><strong>Eenzijdig</strong>: Geweld tegen burgers</li></ul>Doden weergegeven als beste schatting (laag-hoog bereik). ACLED-duplicaten worden automatisch uitgefilterd.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "strategicRisk": {
       "infoTooltip": "<strong>Methodologie</strong> Samengestelde score (0-100) menging:<ul><li>50% Landinstabiliteit (top 5 gewogen)</li><li>30% Geografische convergentiezones</li><li>20% Infrastructuurincidenten</li></ul>Wordt elke 5 minuten automatisch vernieuwd.",

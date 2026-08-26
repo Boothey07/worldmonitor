@@ -1537,7 +1537,11 @@
       "actors": "Actori",
       "deathsCount": "{{count}} decese",
       "moreNotShown": "{{count}} mai multe evenimente nu sunt afișate",
-      "infoTooltip": "<strong>Evenimente de conflict armat</strong> Date despre conflict la nivel de eveniment de la Universitatea Uppsala (UCDP).<ul><li><strong>De stat</strong>: Guvern vs grup rebel</li><li><strong>Non-statal</strong>: Grup armat vs grup armat</li><li><strong>Unilateral</strong>: Violența împotriva civililor este cea mai bună estimare (scăzut). Dublatele ACLED sunt filtrate automat."
+      "infoTooltip": "<strong>Evenimente de conflict armat</strong> Date despre conflict la nivel de eveniment de la Universitatea Uppsala (UCDP).<ul><li><strong>De stat</strong>: Guvern vs grup rebel</li><li><strong>Non-statal</strong>: Grup armat vs grup armat</li><li><strong>Unilateral</strong>: Violența împotriva civililor este cea mai bună estimare (scăzut). Dublatele ACLED sunt filtrate automat.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Index de activitate",

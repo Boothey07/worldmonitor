@@ -1462,7 +1462,11 @@
       "actors": "الأطراف الفاعلة",
       "deathsCount": "{{count}} حالة وفاة",
       "moreNotShown": "{{count}} حدث إضافي غير معروض",
-      "infoTooltip": "<strong>أحداث UCDP المرجعية جغرافياً</strong> بيانات نزاع على مستوى الأحداث من جامعة أوبسالا.<ul><li><strong>قائم على الدولة</strong>: حكومة ضد جماعة متمردة</li><li><strong>غير حكومي</strong>: جماعة مسلحة ضد جماعة مسلحة</li><li><strong>أحادي الجانب</strong>: عنف ضد المدنيين</li></ul>الوفيات معروضة كأفضل تقدير (نطاق أدنى-أعلى). يتم تصفية تكرارات ACLED تلقائياً."
+      "infoTooltip": "<strong>أحداث UCDP المرجعية جغرافياً</strong> بيانات نزاع على مستوى الأحداث من جامعة أوبسالا.<ul><li><strong>قائم على الدولة</strong>: حكومة ضد جماعة متمردة</li><li><strong>غير حكومي</strong>: جماعة مسلحة ضد جماعة مسلحة</li><li><strong>أحادي الجانب</strong>: عنف ضد المدنيين</li></ul>الوفيات معروضة كأفضل تقدير (نطاق أدنى-أعلى). يتم تصفية تكرارات ACLED تلقائياً.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "displacement": {
       "refugees": "لاجئون",

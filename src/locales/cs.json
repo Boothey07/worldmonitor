@@ -1519,7 +1519,11 @@
       "actors": "Aktéři",
       "deathsCount": "{{count}} úmrtí",
       "moreNotShown": "Nezobrazeno dalších událostí: {{count}}",
-      "infoTooltip": "<strong>Georeferencované události UCDP</strong> Údaje o konfliktech na úrovni událostí z Uppsalské univerzity.<ul><li><strong>Státní</strong>: Vláda vs povstalecká skupina</li><li><strong>Nestátní</strong>: Ozbrojená skupina vs ozbrojená skupina</li><li><strong>Jednostranné</strong>: Násilí vůči civilistům</li></ul>Úmrtí zobrazena jako nejlepší odhad (rozmezí minimum-maximum). Duplikáty ACLED jsou automaticky odfiltrovány."
+      "infoTooltip": "<strong>Georeferencované události UCDP</strong> Údaje o konfliktech na úrovni událostí z Uppsalské univerzity.<ul><li><strong>Státní</strong>: Vláda vs povstalecká skupina</li><li><strong>Nestátní</strong>: Ozbrojená skupina vs ozbrojená skupina</li><li><strong>Jednostranné</strong>: Násilí vůči civilistům</li></ul>Úmrtí zobrazena jako nejlepší odhad (rozmezí minimum-maximum). Duplikáty ACLED jsou automaticky odfiltrovány.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Index aktivity",

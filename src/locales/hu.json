@@ -1675,7 +1675,11 @@
       "actors": "Szereplők",
       "deathsCount": "{{count}} halott",
       "moreNotShown": "{{count}} további esemény nem jelenik meg",
-      "infoTooltip": "<strong>Fegyveres konfliktusok eseményei</strong> Eseményszintű konfliktusadatok az Uppsala Egyetemtől (UCDP).<ul><li><strong>Állami szintű</strong>: Kormány vs lázadó csoport</li><li><strong>Nem-állami</strong>: Fegyveres csoport vs fegyveres csoport</li><li><strong>Egyoldalú</strong>: Erőszak a polgárokkal szemben</li></ul>A halálozások legjobb becslésként jelennek meg (alacsony-magas tartomány). Az ACLED duplikátumok automatikusan szűrve vannak."
+      "infoTooltip": "<strong>Fegyveres konfliktusok eseményei</strong> Eseményszintű konfliktusadatok az Uppsala Egyetemtől (UCDP).<ul><li><strong>Állami szintű</strong>: Kormány vs lázadó csoport</li><li><strong>Nem-állami</strong>: Fegyveres csoport vs fegyveres csoport</li><li><strong>Egyoldalú</strong>: Erőszak a polgárokkal szemben</li></ul>A halálozások legjobb becslésként jelennek meg (alacsony-magas tartomány). Az ACLED duplikátumok automatikusan szűrve vannak.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Aktivitásindex",

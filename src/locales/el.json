@@ -1534,7 +1534,11 @@
       "actors": "Δρώντες",
       "deathsCount": "{{count}} θάνατοι",
       "moreNotShown": "{{count}} ακόμη συμβάντα δεν εμφανίζονται",
-      "infoTooltip": "<strong>Γεωαναφερόμενα Συμβάντα UCDP</strong> Δεδομένα συγκρούσεων σε επίπεδο συμβάντος από το Πανεπιστήμιο Uppsala.<ul><li><strong>Κρατικές</strong>: Κυβέρνηση εναντίον ανταρτών</li><li><strong>Μη Κρατικές</strong>: Ένοπλη ομάδα εναντίον ένοπλης ομάδας</li><li><strong>Μονόπλευρες</strong>: Βία κατά αμάχων</li></ul>Οι θάνατοι εμφανίζονται ως βέλτιστη εκτίμηση (εύρος χαμηλό-υψηλό). Τα αντίγραφα ACLED φιλτράρονται αυτόματα."
+      "infoTooltip": "<strong>Γεωαναφερόμενα Συμβάντα UCDP</strong> Δεδομένα συγκρούσεων σε επίπεδο συμβάντος από το Πανεπιστήμιο Uppsala.<ul><li><strong>Κρατικές</strong>: Κυβέρνηση εναντίον ανταρτών</li><li><strong>Μη Κρατικές</strong>: Ένοπλη ομάδα εναντίον ένοπλης ομάδας</li><li><strong>Μονόπλευρες</strong>: Βία κατά αμάχων</li></ul>Οι θάνατοι εμφανίζονται ως βέλτιστη εκτίμηση (εύρος χαμηλό-υψηλό). Τα αντίγραφα ACLED φιλτράρονται αυτόματα.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Δείκτης Δραστηριότητας",

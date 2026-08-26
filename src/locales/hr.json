@@ -1821,7 +1821,11 @@
       "deathsCount": "{{count}} preminulih",
       "moreNotShown": "{{count}} više događaja nije prikazano",
       "noEvents": "Nema događaja u ovoj kategoriji",
-      "infoTooltip": "<strong>Događaji oružanih sukoba</strong> Podaci o sukobima na razini događaja od Uppsalskog sveučilišta (UCDP).<ul><li><strong>Državni konflikt</strong>: Vlada protiv skupine pripadnika bune</li><li><strong>Nedržavni</strong>: Oružana grupa protiv oružane grupe</li><li><strong>Jednostrani</strong>: Nasilje prema civilnom stanovništvu</li></ul>Broj preminulih prikazan kao najbolja procjena (nisko-visoki raspon). Duplikati iz ACLED-a se automatski filtriraju."
+      "infoTooltip": "<strong>Događaji oružanih sukoba</strong> Podaci o sukobima na razini događaja od Uppsalskog sveučilišta (UCDP).<ul><li><strong>Državni konflikt</strong>: Vlada protiv skupine pripadnika bune</li><li><strong>Nedržavni</strong>: Oružana grupa protiv oružane grupe</li><li><strong>Jednostrani</strong>: Nasilje prema civilnom stanovništvu</li></ul>Broj preminulih prikazan kao najbolja procjena (nisko-visoki raspon). Duplikati iz ACLED-a se automatski filtriraju.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Indeks aktivnosti",

@@ -6,9 +6,12 @@ import { getHydratedData } from '@/services/bootstrap';
 import { toApiUrl } from '@/services/runtime';
 import { ConflictServiceClient } from '@/services/generated-rpc-clients';
 import { isDuplicatedByAcled } from './ucdp-dedupe';
+import { deriveSourceOutcome, type ConflictSourceOutcome } from './provenance';
 import type { AcledDedupEvent, UcdpDedupeIndexEntry, UcdpTabAggregate } from './ucdp-dedupe';
 export { deduplicateUcdpProjectionAggregates } from './ucdp-dedupe';
 export type { UcdpDedupeIndexEntry, UcdpTabAggregate } from './ucdp-dedupe';
+export type { ConflictSourceOutcome } from './provenance';
+export { deriveSourceOutcome };
 
 // ---- Client + Circuit Breakers ----
 
@@ -45,6 +48,8 @@ export interface ConflictData {
   byCountry: Map<string, ConflictEvent[]>;
   totalFatalities: number;
   count: number;
+  /** Provenance for the ACLED feed this derives from — see ConflictSourceOutcome. */
+  outcome: ConflictSourceOutcome;
 }
 
 
@@ -125,19 +130,23 @@ export type { ConflictIntensity, UcdpConflictStatus } from './ucdp-classify';
 
 type AcledEvent = AcledDedupEvent;
 
-// ---- Empty fallbacks ----
-
-const emptyAcledFallback: ListAcledEventsResponse = { events: [], pagination: undefined };
-const emptyUcdpFallback: ListUcdpEventsResponse = { events: [], pagination: undefined };
-
 // ---- Exported Functions ----
 
 export async function fetchConflictEvents(): Promise<ConflictData> {
+  // The breaker resolves to  instead of throwing, so a real
+  // failure and a genuinely empty answer are indistinguishable there. A private
+  // sentinel restores the distinction: if we get the sentinel back the fetch
+  // failed; an empty array then means ACLED answered with nothing.
+  const acledFailed = Symbol('acled-unavailable');
   const resp = await acledBreaker.execute(async () => {
     return client.listAcledEvents({ country: '', start: 0, end: 0, pageSize: 0, cursor: '' });
-  }, emptyAcledFallback, { shouldCache: (r) => r.events.length > 0 });
+  }, acledFailed as unknown as ListAcledEventsResponse, { shouldCache: (r) => r.events.length > 0 });
+  const unavailable = resp === (acledFailed as unknown);
 
-  const events = resp.events.map(toConflictEvent);
+  const events = unavailable ? [] : resp.events.map(toConflictEvent);
+  const outcome = unavailable
+    ? { status: 'unavailable' as const, count: 0 }
+    : deriveSourceOutcome(events.map(e => e.time.getTime()));
 
   const byCountry = new Map<string, ConflictEvent[]>();
   let totalFatalities = 0;
@@ -154,11 +163,14 @@ export async function fetchConflictEvents(): Promise<ConflictData> {
     byCountry,
     totalFatalities,
     count: events.length,
+    outcome,
   };
 }
 
 interface UcdpEventsResponse {
+  /** False only when the fetch itself failed — an empty answer is still success. */
   success: boolean;
+  outcome: ConflictSourceOutcome;
   count: number;
   data: UcdpGeoEvent[];
   cached_at: string;
@@ -167,17 +179,30 @@ interface UcdpEventsResponse {
 export async function fetchUcdpEvents(hydrated?: HydratedUcdpPayload): Promise<UcdpEventsResponse> {
   if (hydrated?.events?.length) {
     const events = hydrated.events.map(toUcdpGeoEvent);
-    return { success: true, count: events.length, data: events, cached_at: '' };
+    return {
+      success: true,
+      outcome: deriveSourceOutcome(events.map(e => Date.parse((e.date_end || e.date_start) + 'T00:00:00Z'))),
+      count: events.length,
+      data: events,
+      cached_at: '',
+    };
   }
 
+  // Sentinel identity again: without it success could only be inferred from
+  // the row count, which reads a fetch failure as an answered-but-empty source.
+  const ucdpFailed = Symbol('ucdp-unavailable');
   const resp = await ucdpBreaker.execute(async () => {
     return client.listUcdpEvents({ country: '', start: 0, end: 0, pageSize: 0, cursor: '' });
-  }, emptyUcdpFallback, { shouldCache: (r) => r.events.length > 0 });
+  }, ucdpFailed as unknown as ListUcdpEventsResponse, { shouldCache: (r) => r.events.length > 0 });
+  const unavailable = resp === (ucdpFailed as unknown);
 
-  const events = resp.events.map(toUcdpGeoEvent);
+  const events = unavailable ? [] : resp.events.map(toUcdpGeoEvent);
 
   return {
-    success: events.length > 0,
+    success: !unavailable,
+    outcome: unavailable
+      ? { status: 'unavailable' as const, count: 0 }
+      : deriveSourceOutcome(events.map(e => Date.parse((e.date_end || e.date_start) + 'T00:00:00Z'))),
     count: events.length,
     data: events,
     cached_at: '',

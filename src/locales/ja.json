@@ -1534,7 +1534,11 @@
       "actors": "当事者",
       "deathsCount": "死者{{count}}人",
       "moreNotShown": "他{{count}}件のイベントは非表示",
-      "infoTooltip": "<strong>UCDP地理参照イベント</strong> ウプサラ大学によるイベントレベルの紛争データ。<ul><li><strong>国家間</strong>: 政府対反政府勢力</li><li><strong>非国家間</strong>: 武装グループ対武装グループ</li><li><strong>一方的暴力</strong>: 市民に対する暴力</li></ul>死者数は最良推定値（低-高範囲）で表示。ACLEDの重複は自動的に除外。"
+      "infoTooltip": "<strong>UCDP地理参照イベント</strong> ウプサラ大学によるイベントレベルの紛争データ。<ul><li><strong>国家間</strong>: 政府対反政府勢力</li><li><strong>非国家間</strong>: 武装グループ対武装グループ</li><li><strong>一方的暴力</strong>: 市民に対する暴力</li></ul>死者数は最良推定値（低-高範囲）で表示。ACLEDの重複は自動的に除外。",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "アクティビティ指数",

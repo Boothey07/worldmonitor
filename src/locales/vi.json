@@ -1534,7 +1534,11 @@
       "actors": "Bên tham chiến",
       "deathsCount": "{{count}} thương vong",
       "moreNotShown": "{{count}} sự kiện khác không hiển thị",
-      "infoTooltip": "<strong>Sự kiện Định vị UCDP</strong> Dữ liệu xung đột cấp sự kiện từ Đại học Uppsala.<ul><li><strong>Nhà nước</strong>: Chính phủ đối đầu nhóm nổi dậy</li><li><strong>Phi Nhà nước</strong>: Nhóm vũ trang đối đầu nhóm vũ trang</li><li><strong>Một chiều</strong>: Bạo lực nhắm vào thường dân</li></ul>Thương vong hiển thị ước tính tốt nhất (khoảng thấp-cao). Trùng lặp ACLED được lọc tự động."
+      "infoTooltip": "<strong>Sự kiện Định vị UCDP</strong> Dữ liệu xung đột cấp sự kiện từ Đại học Uppsala.<ul><li><strong>Nhà nước</strong>: Chính phủ đối đầu nhóm nổi dậy</li><li><strong>Phi Nhà nước</strong>: Nhóm vũ trang đối đầu nhóm vũ trang</li><li><strong>Một chiều</strong>: Bạo lực nhắm vào thường dân</li></ul>Thương vong hiển thị ước tính tốt nhất (khoảng thấp-cao). Trùng lặp ACLED được lọc tự động.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Chỉ số Hoạt động",

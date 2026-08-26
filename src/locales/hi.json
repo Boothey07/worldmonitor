@@ -1675,7 +1675,11 @@
       "actors": "अभिनेता",
       "deathsCount": "{{count}} मृत्यु",
       "moreNotShown": "{{count}} और घटनाएं दिखाई नहीं गईं",
-      "infoTooltip": "<strong>सशस्त्र संघर्ष घटनाएं</strong> Uppsala विश्विद्यालय से घटना-स्तरीय संघर्ष डेटा (UCDP)।<ul><li><strong>राज्य आधारित</strong>: सरकार बनाम विद्रोही समूह</li><li><strong>गैर-राज्य</strong>: सशस्त्र समूह बनाम सशस्त्र समूह</li><li><strong>एकतरफा</strong>: नागरिकों पर हिंसा</li></ul>मृत्यु का अनुमानित आंकड़ा (न्यूनतम-उच्चतम सीमा)। ACLED डुप्लिकेट्स स्वचालित रूप से हटाए गए।"
+      "infoTooltip": "<strong>सशस्त्र संघर्ष घटनाएं</strong> Uppsala विश्विद्यालय से घटना-स्तरीय संघर्ष डेटा (UCDP)।<ul><li><strong>राज्य आधारित</strong>: सरकार बनाम विद्रोही समूह</li><li><strong>गैर-राज्य</strong>: सशस्त्र समूह बनाम सशस्त्र समूह</li><li><strong>एकतरफा</strong>: नागरिकों पर हिंसा</li></ul>मृत्यु का अनुमानित आंकड़ा (न्यूनतम-उच्चतम सीमा)। ACLED डुप्लिकेट्स स्वचालित रूप से हटाए गए।",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "गतिविधि सूचकांक",

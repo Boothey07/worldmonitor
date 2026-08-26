@@ -1534,7 +1534,11 @@
       "actors": "Aktorler",
       "deathsCount": "{{count}} olum",
       "moreNotShown": "{{count}} daha fazla olay gosterilmiyor",
-      "infoTooltip": "<strong>UCDP Cografi Referansli Olaylar</strong> Uppsala Universitesi'nden olay bazli catisma verileri.<ul><li><strong>Devlet Tabanli</strong>: Hukumet - isyancilar arasi</li><li><strong>Devlet Disi</strong>: Silahli grup - silahli grup arasi</li><li><strong>Tek Tarafli</strong>: Sivillere yonelik siddet</li></ul>Olumler en iyi tahmin (dusuk-yuksek aralik) olarak gosterilir. ACLED tekrarlari otomatik filtrelenir."
+      "infoTooltip": "<strong>UCDP Cografi Referansli Olaylar</strong> Uppsala Universitesi'nden olay bazli catisma verileri.<ul><li><strong>Devlet Tabanli</strong>: Hukumet - isyancilar arasi</li><li><strong>Devlet Disi</strong>: Silahli grup - silahli grup arasi</li><li><strong>Tek Tarafli</strong>: Sivillere yonelik siddet</li></ul>Olumler en iyi tahmin (dusuk-yuksek aralik) olarak gosterilir. ACLED tekrarlari otomatik filtrelenir.",
+      "provenanceRecords": "UCDP · {{lag}}d behind live",
+      "provenanceUndated": "UCDP · records undated",
+      "provenanceEmpty": "UCDP · source answered, no events",
+      "provenanceUnavailable": "UCDP · source unreachable"
     },
     "giving": {
       "activityIndex": "Faaliyet Endeksi",
