@@ -1238,6 +1238,9 @@
       "references": [
         {
           "path": "scripts/_weather-alert-select.mjs"
+        },
+        {
+          "path": "scripts/ais-relay.cjs"
         }
       ]
     },
@@ -6709,9 +6712,6 @@
         },
         {
           "path": "scripts/lib/company-monitoring-classifier-client.mjs"
-        },
-        {
-          "path": "scripts/regional-snapshot/weekly-brief.mjs"
         }
       ]
     },
