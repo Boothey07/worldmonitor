@@ -56,7 +56,12 @@ const DIGEST_RESPONSE_TIMEOUT_MS = 14_000;
 const POST_FETCH_HEADROOM_MS = 15_000;
 const RESPONSE_GUARD_BAND_MS = 3_000;
 const OVERALL_DEADLINE_MS = VERCEL_INITIAL_RESPONSE_LIMIT_MS - POST_FETCH_HEADROOM_MS;
-const BATCH_CONCURRENCY = 20;
+// All 117 'full'-variant feeds (93 VARIANT_FEEDS.full + 24 INTEL_SOURCES) must fit in
+// ONE batch. Batches are awaited sequentially and each blocks on its slowest member for
+// up to FEED_TIMEOUT_MS, so N batches cost N * 8s against a 10s OVERALL_DEADLINE_MS.
+// At 20 this aborted after ~2 batches and reported 'timeout' for ~59 feeds that were
+// never fetched at all. Keep this comfortably above the largest variant's feed count.
+const BATCH_CONCURRENCY = 128;
 
 type DigestFeedEntry = { category: string; feed: ServerFeed };
 
@@ -526,6 +531,40 @@ async function fetchAndParseRss(
   }
 }
 
+// Non-standard <pubDate> dialects, tried ONLY after `new Date()` has already
+// failed. Two live feeds emit formats no JS engine parses:
+//   CrisisWatch  'Thursday, July 30, 2026 - 15:47'  (Drupal long form)
+//   IAEA         '26-08-21  09:30'                  (YY-MM-DD HH:MM, two spaces)
+// Both previously yielded status 'all-undated' -- every item parsed, then every
+// item dropped by the strict date gate below. This does not relax that gate: an
+// unrecognised string still returns an Invalid Date and is still dropped.
+// Both fallbacks assume UTC (IAEA publishes from Vienna, so up to 2h skew).
+const DRUPAL_LONG_DATE = /^[A-Za-z]+,\s*([A-Za-z]+ \d{1,2}, \d{4})\s*-\s*(\d{1,2}:\d{2})$/;
+const SHORT_YMD_DATE = /^(\d{2})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})$/;
+
+export function parseFeedDate(raw: string): Date {
+  const value = String(raw).trim();
+
+  const standard = new Date(value);
+  if (!Number.isNaN(standard.getTime())) return standard;
+
+  const drupal = value.match(DRUPAL_LONG_DATE);
+  if (drupal) {
+    const parsed = new Date(`${drupal[1]} ${drupal[2]} UTC`);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const short = value.match(SHORT_YMD_DATE);
+  if (short) {
+    const [, yy, mm, dd, hh, min] = short;
+    return new Date(Date.UTC(2000 + +yy, +mm - 1, +dd, +hh, +min));
+  }
+
+  // Deliberately an Invalid Date, not null: the caller's existing
+  // Number.isNaN(getTime()) check then drops the item unchanged.
+  return standard;
+}
+
 // Date-tag priority lists. RSS feeds typically carry <pubDate>; Atom carries
 // <published>/<updated>; ArXiv (and other Dublin Core dialects) carry <dc:date>
 // or <dc:Date.Issued>; some hybrid feeds emit RSS-shaped items with Atom-style
@@ -590,7 +629,7 @@ function parseRssXml(xml: string, feed: ServerFeed, variant: string): ParseResul
       droppedUndated++;
       continue;
     }
-    const parsedDate = new Date(pubDateStr);
+    const parsedDate = parseFeedDate(pubDateStr);
     const parsedMs = parsedDate.getTime();
     if (Number.isNaN(parsedMs)) {
       droppedUndated++;
