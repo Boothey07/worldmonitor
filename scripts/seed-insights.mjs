@@ -105,7 +105,7 @@ const CACHE_TTL = 10800; // 3h — 6x the 30 min cron interval. Shorter = key ex
                          // is gated at brief-selection time (see pickBriefCluster + briefSystemPrompt
                          // in _insights-brief.mjs), not by aging out fast.
 const MAX_HEADLINE_LEN = 500;
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const INSIGHTS_SOURCE_VERSION = 'digest-clustering-v2-importance-diversity';
 const INSIGHTS_MAX_CONSECUTIVE_FAILURES = 100;
 const INSIGHTS_RUN_OUTCOMES = Object.freeze({
@@ -387,6 +387,10 @@ const LLM_PROVIDERS = [
     apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
     model: GROQ_MODEL,
     headers: (key) => ({ 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA }),
+    // gpt-oss-120b reasons by default: without an explicit low effort it spends the
+    // whole token budget on hidden reasoning and returns empty content, which reads
+    // as a silent success rather than an error.
+    extraBody: { reasoning_effort: 'low' },
     timeout: 15_000,
   },
 ];

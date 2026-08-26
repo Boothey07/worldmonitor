@@ -72,7 +72,11 @@ const DEFAULT_PROVIDERS = [
     name: 'groq',
     envKey: 'GROQ_API_KEY',
     apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
+    // gpt-oss-120b reasons by default: without an explicit low effort it spends the
+    // whole token budget on hidden reasoning and returns empty content, which reads
+    // as a silent success rather than an error.
+    extraBody: { reasoning_effort: 'low' },
     timeout: 20_000,
     headers: (key) => ({
       Authorization: `Bearer ${key}`,

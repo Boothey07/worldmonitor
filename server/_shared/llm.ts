@@ -92,11 +92,21 @@ export function getProviderCredentials(
     if (!apiKey) return null;
     return {
       apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
-      model: overrides.model || 'llama-3.3-70b-versatile',
+      // llama-3.3-70b-versatile was decommissioned by Groq (confirmed via
+      // /v1/models — no longer listed, requests 404 model_not_found).
+      // openai/gpt-oss-120b is Groq's current large general-purpose model.
+      // It reasons by default (separate `reasoning` field on the response,
+      // competing with `content` for max_tokens) — reasoning_effort: 'low'
+      // keeps completions from being consumed entirely by hidden reasoning
+      // tokens on the short utility-call budgets used here (verified
+      // 2026-08-18: unset/low max_tokens=10 produced empty content with
+      // finish_reason=length; reasoning_effort:'low' + headroom fixed it).
+      model: overrides.model || 'openai/gpt-oss-120b',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      extraBody: overrides.enableReasoning ? undefined : { reasoning_effort: 'low' },
     };
   }
 

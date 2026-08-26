@@ -506,7 +506,7 @@ function createLiveJudgeModels(options = {}) {
       stage: 'forecast_resolution_judge_groq',
       providerOrder: ['groq'],
       modelOverrides: {
-        groq: process.env.FORECAST_RESOLUTION_JUDGE_MODEL_GROQ || 'llama-3.3-70b-versatile',
+        groq: process.env.FORECAST_RESOLUTION_JUDGE_MODEL_GROQ || 'openai/gpt-oss-120b',
       },
     }),
   ];

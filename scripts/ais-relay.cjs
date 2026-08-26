@@ -3677,7 +3677,7 @@ function classifyCacheKey(title) {
 // LLM provider fallback chain — mirrors seed-insights.mjs LLM_PROVIDERS
 // Order: ollama → openrouter → groq (canonical chain since #4944, mirrors
 // server/_shared/llm.ts: DeepSeek V4 Flash primary with reasoning disabled,
-// groq llama-3.3-70b-versatile as the free-tier/outage fallback).
+// groq openai/gpt-oss-120b as the free-tier/outage fallback).
 const CLASSIFY_LLM_PROVIDERS = [
   {
     name: 'ollama',
@@ -3706,8 +3706,12 @@ const CLASSIFY_LLM_PROVIDERS = [
     name: 'groq',
     envKey: 'GROQ_API_KEY',
     apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA }),
+    // gpt-oss-120b reasons by default: without an explicit low effort it spends the
+    // whole token budget on hidden reasoning and returns empty content, which reads
+    // as a silent success rather than an error.
+    extraBody: { reasoning_effort: 'low' },
     timeout: 30000,
   },
 ];
