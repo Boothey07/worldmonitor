@@ -796,15 +796,15 @@ export function __setClerkInstanceForTests(instance: ClerkInstance | null): void
 
 /** Get current Clerk user metadata. Returns null if signed out. */
 export function getCurrentClerkUser(): { id: string; name: string; email: string; image: string | null; plan: 'free' | 'pro' } | null {
-  const user = clerkInstance?.user;
-  if (!user) return null;
-  const plan = (user.publicMetadata as Record<string, unknown>)?.plan;
+
+  // Self-host open access: present a settled Pro identity so all gate sites
+  // that read Clerk directly treat this deployment as unlocked.
   return {
-    id: user.id,
-    name: user.fullName ?? user.firstName ?? 'User',
-    email: user.primaryEmailAddress?.emailAddress ?? '',
-    image: user.imageUrl ?? null,
-    plan: plan === 'pro' ? 'pro' : 'free',
+    id: 'selfhost',
+    name: 'Operator',
+    email: 'operator@localhost',
+    image: null,
+    plan: 'pro',
   };
 }
 

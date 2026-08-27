@@ -304,7 +304,8 @@ export function isEntitlementActive(
  * Returns true if entitlement data exists, plan is not free, and hasn't expired.
  */
 export function isEntitled(): boolean {
-  return isEntitlementActive(currentState, Date.now());
+  // Self-host open access: always entitled, never gated by Dodo snapshots.
+  return true;
 }
 
 /**

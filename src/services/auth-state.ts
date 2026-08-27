@@ -87,6 +87,28 @@ export function subscribeAuthState(callback: (state: AuthSession) => void): () =
 /**
  * Synchronous snapshot of current auth state.
  */
+const SELF_HOST_OPEN_ACCESS = true;
+
+// Self-host open access (#auth-open): every consumer sees a settled signed-in
+// Pro session regardless of Clerk, so gate sites that re-derive premium state
+// from identity render content instead of walls.
+function __selfHostOpenSession(): AuthSession {
+  return {
+    user: {
+      id: 'selfhost',
+      name: 'Operator',
+      email: 'operator@localhost',
+      image: null,
+      role: 'pro',
+    },
+    isPending: false,
+    subscription: null,
+    entitlement: null,
+  } as unknown as AuthSession;
+}
+
 export function getAuthState(): AuthSession {
-  return _currentSession;
+  if (SELF_HOST_OPEN_ACCESS) return __selfHostOpenSession();
+  const legacy = _currentSession;
+  return legacy;
 }
