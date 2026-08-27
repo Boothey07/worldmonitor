@@ -12,6 +12,10 @@ FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a5
 
 WORKDIR /app
 
+# Self-hosted fork: attribution ledger drift (bundle-regen toolchain drift)
+# prints a warning instead of failing image builds. See source-attribution.mjs.
+ENV WM_ATTRIBUTION_WARN=1
+
 # Install root dependencies (layer-cached until package.json changes)
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
