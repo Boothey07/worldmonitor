@@ -27,6 +27,12 @@ RUN node scripts/generate-inventory-facts.mjs
 # Output is api/**/*.js alongside the source .ts files
 RUN node docker/build-handlers.mjs
 
+# Self-hosted fork: [rpc].js bundles were just regenerated (they are gitignored,
+# so their reference paths exist ONLY here). Reconcile the attribution ledger
+# against this exact tree before the corpus build validates it; otherwise the
+# validator compares against paths from whatever machine last ran --write.
+RUN node scripts/source-attribution.mjs --write
+
 # public/pro/ is a build product, not committed bytes (#6898), so this image has
 # to build it. Skipping it does NOT 404: this image installs docker/nginx.conf,
 # whose `location /` ends in `try_files $uri $uri/ /dashboard.html`,
