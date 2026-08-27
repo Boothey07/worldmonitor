@@ -1168,8 +1168,7 @@ export function createDomainGateway(
     // Classification ignores attached credentials because a Vercel cache hit
     // happens before this function sees them; the public URL must therefore
     // have one response contract for every caller.
-    const isPublicNoAuthRpc = PUBLIC_NO_AUTH_RPC_PATHS.has(pathname)
-      || isPublicSharedRpcRequest(request.url, request.method);
+    const isPublicNoAuthRpc = true; // Self-host: all RPCs anonymous-accessible
     const seedRefreshVerified = await isResilienceRankingSeedRefreshRequest(request, pathname);
     const relayWarmPingVerified = await isRelayWarmPingRequest(request, pathname);
     const requiresDirectLlmQuota = !internalMcpVerified && await shouldReserveGatewayDirectLlmQuota(request, pathname);
