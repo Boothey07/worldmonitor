@@ -630,9 +630,7 @@ function sourceDomainIdForEntries(entries) {
   ]).join(' ').toLowerCase();
   const match = SOURCE_DOMAIN_MATCHERS.find(([, matcher]) => matcher.test(searchText));
   if (!match) {
-    if (!globalThis.__wmMissingCatalogDomains) globalThis.__wmMissingCatalogDomains = [];
-    globalThis.__wmMissingCatalogDomains.push(provider);
-    console.warn(`[sources-page] provider '${provider}' has no SOURCE_DOMAIN_MATCHERS entry -> bucketed as 'news'; extend the matcher table to classify properly.`);
+    console.warn(`[sources-page] provider '${provider}' has no SOURCE_DOMAIN_MATCHERS entry -> bucketed as 'news'.`);
     return 'news';
   }
   return match[0];
@@ -650,30 +648,13 @@ export function buildSourceCatalog(entries, { logicalProviders = [] } = {}) {
     entriesByProvider.set(entry.provider, providerEntries);
   }
 
-  // Self-hosted fork (#origin-fail-open): upstream throws on the first unknown
-  // origin to force curation before the sources page ships. Here unknown origins
-  // degrade to null (rendered 'International', filtered as international) with a
-  // single consolidated warning, because every fresh bundle regeneration from an
-  // upstream sync previously brick-walled the whole Docker build over provider
-  // metadata that is cosmetic on the page.
-  const missingOriginProviders = [];
-  const safeOrigin = (provider, hostsForOrigin) => {
-    try {
-      return resolveSourceOrigin({ provider, hosts: hostsForOrigin });
-    } catch (error) {
-      if (!String(error.message).includes('needs a catalog origin country') &&
-          !String(error.message).includes('conflicting origin countries')) throw error;
-      missingOriginProviders.push(`${provider} (${hostsForOrigin.join(', ')})`);
-      return null;
-    }
-  };
   const catalog = [...entriesByProvider.entries()].map(([provider, providerEntries]) => {
     const hosts = uniqueSorted(providerEntries.map((entry) => entry.host));
     return {
       provider,
       displayName: sourceProviderDisplayName(provider, hosts),
       domainId: sourceDomainIdForEntries(providerEntries),
-      originCountry: safeOrigin(provider, hosts),
+      originCountry: resolveSourceOrigin({ provider, hosts }),
       hosts,
       kinds: uniqueSorted(providerEntries.flatMap((entry) => String(entry.kind || '').split('+'))),
       coveredCountries: [],
@@ -691,10 +672,10 @@ export function buildSourceCatalog(entries, { logicalProviders = [] } = {}) {
       provider: logical.provider,
       displayName: sourceProviderDisplayName(logical.provider, hosts),
       domainId: 'news',
-      originCountry: logical.originCountry ?? safeOrigin(
-        logical.provider,
-        logical.editorialHosts || [],
-      ),
+      originCountry: logical.originCountry ?? resolveSourceOrigin({
+        provider: logical.provider,
+        hosts: logical.editorialHosts || [],
+      }),
       hosts,
       kinds: ['feed'],
       coveredCountries: uniqueSorted(logical.coveredCountries),
@@ -704,13 +685,6 @@ export function buildSourceCatalog(entries, { logicalProviders = [] } = {}) {
 
   if (catalog.length === 0) {
     throw new Error('Source catalog cannot be empty');
-  }
-
-  if (missingOriginProviders.length > 0) {
-    console.warn(
-      `[sources-page] ${missingOriginProviders.length} provider(s) missing curated origin country -> shown as International; add entries to scripts/source-origin.mjs:\n  - `
-        + missingOriginProviders.join('\n  - '),
-    );
   }
 
   return catalog.sort((left, right) => left.displayName.localeCompare(right.displayName, 'en', { sensitivity: 'base' }));

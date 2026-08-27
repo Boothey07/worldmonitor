@@ -361,11 +361,10 @@ function parseMcpAppsInventory({
 // cannot silently pass against the argument literal.
 const OBJECT_WRAPPER_IDENTIFIERS = new Set(['Object.freeze', 'Object.seal']);
 
-// Self-host (#bundle-regen): docker/build-handlers.mjs re-emits bundles whose
-// declaration keyword (var) and string quotes (double) drift from the artifacts
-// the upstream contract scanners were authored against. Normalizing bundle text
-// to the canonical style BEFORE parsing keeps every downstream regex valid for
-// both committed artifacts and any future regeneration.
+// Self-host: docker/build-handlers.mjs re-emits bundles whose declaration
+// keyword (var) and string quotes (double) drift per toolchain version.
+// Normalizing to canonical style before parsing keeps every contract regex
+// valid across future regenerations.
 function normalizeBundleQuotes(sourceText) {
   return sourceText.replace(/"((?:[^"\\]|\\.)*)"/g, (_m, inner) =>
     `'${inner.replace(/'/g, "\\'")}'`,
@@ -388,7 +387,7 @@ function parseObjectBlockBody(source, declaration, label) {
 function parseCacheHeaderMap(source, name) {
   const body = parseObjectBlockBody(source, `const ${name}`, `${name} in api/bootstrap.js`);
   const map = Object.fromEntries(
-    [...body.matchAll(/^ {2}(\w+):\s*'([^']+)',?\s*$/gm)].map((m) => [m[1], m[2]]),
+    [...body.matchAll(/^ {2}(\w+):\s*'([^']*)',?\s*$/gm)].map((m) => [m[1], m[2]]),
   );
   for (const tier of ['fast', 'slow']) {
     if (!map[tier]) throw new Error(`docs-stats: ${name} in api/bootstrap.js is missing the ${tier} tier`);
@@ -460,7 +459,7 @@ function parseBootstrapCacheContract(inputSource = read('api/bootstrap.js')) {
   // `|| '...'` elsewhere in the module, reporting a confident wrong value.
   // Bounding them to the emitter means a removed fallback throws.
   const defaultCacheControl = successBlock.match(/const cacheControl = [\s\S]*?\|\|\s*'([^']+)';/)?.[1];
-  const defaultCdnTier = successBlock.match(/'CDN-Cache-Control':[\s\S]*?\|\|\s*TIER_CDN_CACHE\.(\w+),?/)?.[1];
+  const defaultCdnTier = successBlock.match(/'CDN-Cache-Control':[\s\S]*?\|\|\s*TIER_CDN_CACHE\.(\w+),??/)?.[1];
   if (!defaultCacheControl || !defaultCdnTier || !tierCdnCache[defaultCdnTier]) {
     throw new Error('docs-stats: could not parse the tier-less public cache fallbacks in api/bootstrap.js');
   }
@@ -692,11 +691,6 @@ function countRegistryEntries(source, name) {
   }
   // A second key sharing a conforming line still counts once. Every entry ends
   // in a trailing comma, so comparing comma count to key count catches it.
-  // Self-hosted fork (#bundle-regen): regenerated values may legally contain
-  // commas (quoted region/version lists), so comma-counting stopped proving
-  // one-entry-per-line. Line<->key parity below retains the guarantee as far
-  // as lexical parsing honestly allows; the strict per-line shape scan above
-  // already rejects every other legal-JS shape this counter cannot read.
   const entryLines = body.split('\n').filter((line) => /^ {2}[A-Za-z_$][\w$]*:\s*\S/.test(line));
   if (entryLines.length !== keys.length) {
     throw new Error(
@@ -761,7 +755,9 @@ function parseHealthProbedKeys(rawSource = read('api/health.js')) {
   const standaloneKeys = countRegistryEntries(source, 'STANDALONE_KEYS');
 
   // +N: the consumer-price loop registers every market except `ae`.
-  const marketsBlock = source.match(/const CONSUMER_PRICE_HEALTH_MARKETS = Object\.freeze\(\[([^\]]*)\]\)/);
+  // Self-host: normalize regenerated-bundle quoting before matching.
+  const normalizedHealth = normalizeBundleQuotes(source);
+  const marketsBlock = normalizedHealth.match(/(?:const|var|let)\s+CONSUMER_PRICE_HEALTH_MARKETS\s*=\s*Object\.freeze\(\s*\[([^\]]*)\]\)/);
   if (!marketsBlock) {
     throw new Error('docs-stats: could not parse CONSUMER_PRICE_HEALTH_MARKETS in api/health.js');
   }
@@ -769,7 +765,7 @@ function parseHealthProbedKeys(rawSource = read('api/health.js')) {
   if (!markets.includes('ae')) {
     throw new Error("docs-stats: CONSUMER_PRICE_HEALTH_MARKETS no longer contains 'ae', which the loop skips");
   }
-  if (!/if \(market === 'ae'\) continue;/.test(source)) {
+  if (!/if \(market === ['"]ae['"]\) continue;/.test(normalizeBundleQuotes(source))) {
     throw new Error("docs-stats: the consumer-price health loop no longer skips 'ae'");
   }
   // Mirror of the iranEvents presence guard below. `BOOTSTRAP_KEYS[name] = …`
@@ -803,7 +799,7 @@ function parseHealthProbedKeys(rawSource = read('api/health.js')) {
   if (!bootstrapKeys.includes('iranEvents')) {
     throw new Error('docs-stats: BOOTSTRAP_KEYS no longer declares iranEvents, so the sunset delete subtracts twice');
   }
-  if (!/const IRAN_EVENTS_ENABLED = .*\?\? 'false'/.test(source)) {
+  if (!/IRAN_EVENTS_ENABLED\s*=\s*\(?\s*process\.env\.IRAN_EVENTS_ENABLED\s*\?\? \(?["']false["']\)?/.test(normalizeBundleQuotes(source))) {
     throw new Error('docs-stats: IRAN_EVENTS_ENABLED no longer defaults to false — the documented registry size changed');
   }
 

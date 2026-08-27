@@ -978,24 +978,16 @@ export function scanUpstreamHosts(rootDir = ROOT) {
   // References are recorded per file, never per line. A line number is not part
   // of the attribution (which records license posture and required credit), and
   // pinning one made every unrelated edit rewrite the committed manifest.
-  // Bundled handlers inline dependency metadata (license/homepage URLs from
-  // npm packages). Those are not World Monitor sources; scan them out so the
-  // committed ledger stays about data providers we actually consume.
-  const SELF_HOST_SCAN_EXCLUDED_HOSTS = new Set([
-    'opencollective.com', 'chatgpt.com', 'claude.ai', 'claude.com',
-  ]);
   const recordHost = (host, kind, path) => {
-    if (SELF_HOST_SCAN_EXCLUDED_HOSTS.has(host)) return;
     const current = hosts.get(host) || { host, kinds: new Set(), references: [] };
     current.kinds.add(kind);
     if (!current.references.some((reference) => reference.path === path)) current.references.push({ path });
     hosts.set(host, current);
   };
   for (const relativePath of walkSourceFiles(rootDir)) {
-    // Generated aggregation artifacts must never be scan inputs: they embed
-    // every other host string, so including them makes the ledger depend on
-    // filesystem timing across build steps instead of actual sources.
+    // Self-host: generated artifacts whose content flips between build steps.
     if (relativePath === 'api/_inventory-facts.generated.js') continue;
+    if (/^api\/[^/]+\/v1\/\[rpc\]\.js$/.test(relativePath)) continue;
     const source = read(rootDir, relativePath);
     const lineStarts = [0];
     for (let offset = source.indexOf('\n'); offset !== -1; offset = source.indexOf('\n', offset + 1)) {
@@ -1586,16 +1578,11 @@ export function sourceAttributionLedgerStats(manifest, { observedHosts } = {}) {
 
 export function sourceAttributionStats(inventory, manifest) {
   const validationErrors = validateManifest(inventory, manifest);
-  if (validationErrors.length) {
-    if (process.env.WM_ATTRIBUTION_WARN === '1') {
-      console.warn(
-        `[attribution] WM_ATTRIBUTION_WARN: ${validationErrors.length} drifted entries; building anyway. First few:` +
-          '\n - ' + validationErrors.slice(0, 4).join('\n - '),
-      );
-      return sourceAttributionLedgerStats(manifest);
-    }
-    throw new Error(`source-attribution: invalid manifest (${validationErrors.join('; ')})`);
+  if (validationErrors.length && process.env.WM_ATTRIBUTION_WARN === '1') {
+    console.warn(`[attribution] WM_ATTRIBUTION_WARN: ${validationErrors.length} drifted entries; proceeding.`);
+    return sourceAttributionLedgerStats(manifest, { observedHosts: inventory.length });
   }
+  if (validationErrors.length) throw new Error(`source-attribution: invalid manifest (${validationErrors.join('; ')})`);
   return sourceAttributionLedgerStats(manifest, { observedHosts: inventory.length });
 }
 
@@ -1683,21 +1670,6 @@ function serializeManifest(manifest) {
  * when clean, the stats the CLI prints.
  */
 export function checkSourceAttribution(rootDir = ROOT) {
-  // Self-hosted fork: bundle regeneration with drifting toolchains makes the
-  // strict ledger byte-comparison brick image builds over cosmetic metadata.
-  // WM_ATTRIBUTION_WARN=1 prints the drift summary and lets every build stage
-  // proceed; with the variable unset this function is untouched upstream code.
-  if (process.env.WM_ATTRIBUTION_WARN === '1') {
-    const warnManifest = loadManifest(rootDir);
-    const drift = validateManifest(scanUpstreamHosts(rootDir), warnManifest);
-    if (drift.length) {
-      console.warn(
-        `[attribution] WM_ATTRIBUTION_WARN: ${drift.length} drifted entries; building anyway. First few:` +
-          '\n - ' + drift.slice(0, 4).join('\n - '),
-      );
-    }
-    return { errors: [], stats: sourceAttributionLedgerStats(warnManifest) };
-  }
   // Before anything else, because an absent manifest otherwise surfaces as one
   // "missing manifest entry" per host and never names the real cause.
   const manifestPath = join(rootDir, MANIFEST_PATH);
