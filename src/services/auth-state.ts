@@ -23,7 +23,7 @@ export interface AuthSession {
   isPending: boolean;
 }
 
-let _currentSession: AuthSession = { user: null, isPending: true };
+let _currentSession: AuthSession = __selfHostOpenSession();
 
 function snapshotSession(): AuthSession {
   if (SELF_HOST_OPEN_ACCESS) return __selfHostOpenSession();
@@ -77,6 +77,17 @@ export async function initAuthState(): Promise<void> {
  * Subscribe to reactive auth state changes.
  * @returns Unsubscribe function.
  */
+export function subscribeAuthState(callback: (state: AuthSession) => void): () => void {
+  // Self-host: always emit the open-access session, ignoring Clerk events.
+  callback(__selfHostOpenSession());
+
+  return subscribeClerk(() => {
+    _currentSession = __selfHostOpenSession();
+    callback(_currentSession);
+  });
+}
+
+/* upstream original (unreachable while SELF_HOST_OPEN_ACCESS):
 export function subscribeAuthState(callback: (state: AuthSession) => void): () => void {
   // Emit current state immediately
   callback(_currentSession);
