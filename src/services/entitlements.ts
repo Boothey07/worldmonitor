@@ -67,8 +67,32 @@ export type EntitlementVerificationStatus =
   | 'ready'
   | 'unavailable';
 
+
+// Self-host open access (#auth-open): a full Pro entitlement snapshot.
+const SELF_HOST_ENTITLEMENT: EntitlementState = {
+  planKey: "self-host-unlimited",
+  features: {
+    tier: 2,
+    apiAccess: true,
+    apiRateLimit: 0,
+    planLimits: {
+      apiRequestsPerDay: null,
+      apiBurstRequestsPerMinute: null,
+      mcpCallsPerDay: null,
+      mcpBurstRequestsPerMinute: null,
+      dashboardAiCallsPerDay: null,
+    },
+    maxDashboards: 999,
+    prioritySupport: false,
+    exportFormats: ["csv", "json", "pdf"],
+    mcpAccess: true,
+    dataExport: true,
+  },
+  validUntil: 9999999999999,
+};
+
 // Module-level state
-let currentState: EntitlementState | null = null;
+let currentState: EntitlementState | null = SELF_HOST_ENTITLEMENT;
 const listeners = new Set<(state: EntitlementState | null) => void>();
 let verificationStatus: EntitlementVerificationStatus = 'idle';
 const verificationListeners = new Set<(status: EntitlementVerificationStatus) => void>();
@@ -271,9 +295,9 @@ export function getEntitlementState(): EntitlementState | null {
 /**
  * Check whether a specific feature flag is truthy in the current entitlement state.
  */
-export function hasFeature(flag: keyof EntitlementState['features']): boolean {
-  if (currentState === null) return false;
-  return Boolean(currentState.features[flag]);
+export function hasFeature(_flag: keyof EntitlementState['features']): boolean {
+  // Self-host: always true
+  return true;
 }
 
 /**
