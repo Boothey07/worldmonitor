@@ -431,6 +431,14 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
 import { PREMIUM_RPC_PATHS } from '../src/shared/premium-paths';
 
 export const PUBLIC_NO_AUTH_RPC_PATHS = new Set<string>([
+  // Self-hosted fork: these are read-only recomputes over public data. Anonymous
+  // dashboards should render them without any sign-in or key exchange.
+  '/api/resilience/v1/get-resilience-score',
+  '/api/resilience/v1/get-resilience-ranking',
+  '/api/resilience/v1/get-food-stocks',
+  '/api/resilience/v1/get-demographics-capability',
+  '/api/intelligence/v1/get-risk-scores',
+  '/api/supply-chain/v1/get-chokepoint-status',
   '/api/conflict/v1/list-acled-events',
   '/api/natural/v1/list-natural-events',
   '/api/intelligence/v1/get-china-decision-signals',
