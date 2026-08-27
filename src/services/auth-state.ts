@@ -6,6 +6,8 @@ import {
   subscribeClerk,
 } from './clerk';
 
+const SELF_HOST_OPEN_ACCESS = true;
+
 /** Minimal user profile exposed to UI components. */
 export interface AuthUser {
   id: string;
@@ -24,6 +26,7 @@ export interface AuthSession {
 let _currentSession: AuthSession = { user: null, isPending: true };
 
 function snapshotSession(): AuthSession {
+  if (SELF_HOST_OPEN_ACCESS) return __selfHostOpenSession();
   const cu = getCurrentClerkUser();
   if (!cu) {
     enqueueSentryCall((s) => s.setUser(null));
