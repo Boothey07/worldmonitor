@@ -23,8 +23,6 @@ RUN npm ci --ignore-scripts
 # Copy full source
 COPY . .
 
-RUN echo "[probe] wm_env=$WM_ATTRIBUTION_WARN"
-RUN echo "[probe] src-guard=$(grep -c WM_ATTRIBUTION_WARN scripts/source-attribution.mjs)"
 
 # Generated inventory modules are intentionally untracked. Recreate them in
 # the clean image context before handlers import or bundle them.
