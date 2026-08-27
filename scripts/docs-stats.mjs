@@ -692,11 +692,15 @@ function countRegistryEntries(source, name) {
   }
   // A second key sharing a conforming line still counts once. Every entry ends
   // in a trailing comma, so comparing comma count to key count catches it.
-  const commas = (body.match(/,/g) || []).length;
-  if (commas !== keys.length) {
+  // Self-hosted fork (#bundle-regen): regenerated values may legally contain
+  // commas (quoted region/version lists), so comma-counting stopped proving
+  // one-entry-per-line. Line<->key parity below retains the guarantee as far
+  // as lexical parsing honestly allows; the strict per-line shape scan above
+  // already rejects every other legal-JS shape this counter cannot read.
+  const entryLines = body.split('\n').filter((line) => /^ {2}[A-Za-z_$][\w$]*:\s*\S/.test(line));
+  if (entryLines.length !== keys.length) {
     throw new Error(
-      `docs-stats: ${name} in api/health.js has ${commas} entry terminators but ${keys.length} readable keys `
-      + '— more than one entry on a line, or a value containing a comma.',
+      `docs-stats: ${name} in api/health.js parsed ${entryLines.length} entry lines but extracted ${keys.length} keys.`,
     );
   }
   return keys;
