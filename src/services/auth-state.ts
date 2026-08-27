@@ -90,7 +90,6 @@ export function subscribeAuthState(callback: (state: AuthSession) => void): () =
 /**
  * Synchronous snapshot of current auth state.
  */
-const SELF_HOST_OPEN_ACCESS = true;
 
 // Self-host open access (#auth-open): every consumer sees a settled signed-in
 // Pro session regardless of Clerk, so gate sites that re-derive premium state
