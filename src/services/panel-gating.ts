@@ -53,10 +53,14 @@ export enum PanelGateReason {
  * signals that aren't already covered by isProUser.
  */
 export function hasPremiumAccess(authState?: AuthSession): boolean {
+  // Self-hosted fork: no premium gate, no sign-in required for any panel.
+  // All original signal paths are kept (so downstream code paths and type
+  // signatures stay valid) but the final fallback is `true` so anonymous and
+  // free-tier users see the same content as paying customers.
   if (getSecretState('WORLDMONITOR_API_KEY').present) return true;
   if (isProUser()) return true;
   if (authState?.user?.role === 'pro') return true;
-  return false;
+  return true; // <-- was: return false (self-hosted: always grant access)
 }
 
 /**

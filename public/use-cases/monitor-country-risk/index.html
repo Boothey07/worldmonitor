@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monitor Country Risk | World Monitor Use Cases</title>
+    <meta name="description" content="A repeatable World Monitor country-risk workflow: establish a baseline, review live instability, check corroborating signals, record uncertainty, then act.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://www.worldmonitor.app/use-cases/monitor-country-risk/">
+    <meta name="lastmod" content="2026-08-18">
+    
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Monitor Country Risk | World Monitor Use Cases">
+    <meta property="og:description" content="A repeatable World Monitor country-risk workflow: establish a baseline, review live instability, check corroborating signals, record uncertainty, then act.">
+    <meta property="og:url" content="https://www.worldmonitor.app/use-cases/monitor-country-risk/">
+    <meta property="og:site_name" content="World Monitor">
+    <meta property="og:image" content="https://www.worldmonitor.app/favico/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="World Monitor — real-time global intelligence dashboard with live markets, geopolitical data, and infrastructure monitoring">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Monitor Country Risk | World Monitor Use Cases">
+    <meta name="twitter:description" content="A repeatable World Monitor country-risk workflow: establish a baseline, review live instability, check corroborating signals, record uncertainty, then act.">
+    <meta name="twitter:image" content="https://www.worldmonitor.app/favico/og-image.png">
+    <meta name="twitter:image:alt" content="World Monitor — real-time global intelligence dashboard with live markets, geopolitical data, and infrastructure monitoring">
+    <meta name="twitter:site" content="@worldmonitorai">
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"Monitor country risk","description":"A repeatable World Monitor country-risk workflow: establish a baseline, review live instability, check corroborating signals, record uncertainty, then act.","url":"https://www.worldmonitor.app/use-cases/monitor-country-risk/","inLanguage":"en-US","dateModified":"2026-08-18"}</script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.worldmonitor.app/"},{"@type":"ListItem","position":2,"name":"Use cases","item":"https://www.worldmonitor.app/use-cases/"},{"@type":"ListItem","position":3,"name":"Monitor country risk","item":"https://www.worldmonitor.app/use-cases/monitor-country-risk/"}]}</script>
+    <style>
+      :root { color-scheme: dark; --bg: #050807; --panel: #0c1210; --text: #eef8f0; --muted: #a8b8ad; --line: #1b2b22; --accent: #4ade80; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      header, main, footer { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+      header { padding-top: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+      nav { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 14px; }
+      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+      main { padding-top: 36px; padding-bottom: 52px; }
+      h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1; margin: 0 0 16px; letter-spacing: 0; }
+      h2 { margin-top: 36px; font-size: 22px; }
+      p { color: var(--muted); }
+      .lede { font-size: 18px; max-width: 760px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 24px; }
+      .card, .metric { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: var(--panel); }
+      .metric strong { display: block; font-size: 28px; color: var(--text); }
+      .metric small { display: block; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+      .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; font-weight: 700; }
+      .cta { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; padding: 13px 18px; border-radius: 8px; background: var(--accent); color: #04170c; font-weight: 700; font-size: 15px; }
+      .cta:hover { text-decoration: none; filter: brightness(1.08); }
+      .live-tool { margin-top: 28px; padding: 20px; border: 1px solid #28543a; border-radius: 12px; background: linear-gradient(145deg, #0e1712, #09100c); }
+      .live-tool h2 { margin: 3px 0 0; }
+      .live-tool .grid { margin-top: 18px; }
+      .tool-head, .tool-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+      .tool-note { max-width: 760px; margin-bottom: 0; }
+      .tool-meta { margin-top: 16px; color: var(--muted); font-size: 13px; }
+      .live-status { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; font-weight: 700; }
+      .live-tool[data-state="ready"] .live-status { border-color: #28543a; color: var(--accent); }
+      .live-tool[data-state="partial"] .live-status { border-color: #7c6322; color: #fde68a; }
+      .live-tool[data-state="error"] .live-status { border-color: #6f3b3b; color: #fca5a5; }
+      .refresh { border: 1px solid var(--line); border-radius: 7px; padding: 12px 14px; background: #121d16; color: var(--text); cursor: pointer; font: inherit; }
+      .refresh:hover:not(:disabled) { border-color: var(--accent); }
+      .refresh:disabled { cursor: wait; opacity: 0.55; }
+      .tool-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+      .tool-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+      .tool-controls select { min-width: 240px; border: 1px solid var(--line); border-radius: 7px; padding: 12px 34px 12px 12px; background: #121d16; color: var(--text); font: inherit; }
+      .result-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+      .result-list li { border-left: 2px solid var(--line); padding: 8px 12px; color: var(--muted); font-size: 14px; }
+      .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 18px; }
+      .split > section { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: var(--panel); }
+      .split h3 { margin: 0; font-size: 18px; }
+      .split .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split .metric strong { font-size: 22px; }
+      .routes { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 8px; }
+      .routes li { border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; background: var(--panel); color: var(--text); font-size: 14px; }
+      .routes .vol { color: var(--muted); }
+      .domains { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      .card.domain p { margin: 8px 0 12px; font-size: 14px; }
+      .card.domain .providers { display: flex; flex-wrap: wrap; gap: 6px; }
+      .card.domain .providers span { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--muted); font-size: 12px; }
+      .card.domain:hover { border-color: var(--accent); text-decoration: none; }
+      .related { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 0 20px; }
+      .related a { display: inline-flex; align-items: center; min-height: 44px; }
+      .source { margin-top: 34px; font-size: 13px; color: var(--muted); }
+      table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 14px; }
+      caption { caption-side: top; text-align: left; color: var(--muted); font-size: 13px; padding-bottom: 8px; }
+      th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+      th { color: var(--muted); font-weight: 600; background: var(--panel); }
+      td data { color: var(--text); }
+      figure { margin: 20px 0 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+      figcaption { margin-top: 10px; color: var(--muted); font-size: 13px; }
+      blockquote { margin: 16px 0 0; padding: 12px 16px; border-left: 2px solid var(--accent); background: var(--panel); border-radius: 0 8px 8px 0; }
+      blockquote p { margin: 0; color: var(--text); font-size: 14px; }
+      footer { border-top: 1px solid var(--line); padding-top: 20px; padding-bottom: 28px; color: var(--muted); font-size: 13px; }
+
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Primary">
+        <a href="/">World Monitor</a>
+        <a href="/sources/">Sources</a>
+        <a href="/countries/">Countries</a>
+        <a href="/chokepoints/">Chokepoints</a>
+        <a href="/crises/">Crises</a>
+        <a href="/tools/">Live tools</a>
+        <a href="/research/">Research</a>
+        <a href="/use-cases/">Use cases</a>
+        <a href="/reference/changelog/">Changelog</a>
+        <a href="/blog/glossary/">Glossary</a>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Use case</p>
+      <h1>Monitor country risk</h1>
+      <p class="lede"><strong>Direct answer:</strong> treat country risk as a continuous watch, not an annual PDF. Establish structural and live baselines, review movers and corroborating signals, record what you cannot prove, and continue into an exact World Monitor country brief.</p>
+
+      <h2>Who this is for</h2>
+      <p>Risk analysts, corporate security, procurement, investors, and NGO security officers who need a repeatable monitoring decision for a defined country set.</p>
+      <p><strong>Not for:</strong> emergency dispatch, legal certification, military targeting, or any decision that requires primary field reporting. World Monitor aggregates public and licensed signals; it does not certify events.</p>
+
+      <h2>Workflow inputs and output</h2>
+      <ul>
+        <li><strong>User:</strong> an analyst accountable for a named country exposure list.</li>
+        <li><strong>Decision:</strong> whether to keep routine watch, deepen the dossier, escalate alerting, or brief stakeholders.</li>
+        <li><strong>Trigger:</strong> a new exposure, a score move, a hotspot near an exposure, or a scheduled daily check.</li>
+        <li><strong>Expected output:</strong> a dated monitoring note with baseline, live pressure, corroboration, uncertainty, and the next action.</li>
+      </ul>
+
+      <h2>End-to-end workflow</h2>
+      <ol>
+        <li><strong>Establish a baseline.</strong> Read the Country Instability Index (fast clock) beside the Country Resilience Index (slow clock) for each exposure. Record the score, band, and 24-hour delta. Live country pages publish the current snapshot at <a href="/countries/">/countries/</a>.</li>
+        <li><strong>Review current instability and forecasts.</strong> Open the country brief, inspect component drivers (unrest, conflict, security, information), and note any prediction-market contracts tied to the country without treating them as proof.</li>
+        <li><strong>Check corroborating economic and security signals.</strong> Look for independent families near the exposure — hotspot trends, keyword monitors, infrastructure adjacency, chokepoints, travel advisories, or sanctions context — and require more than repeated headlines.</li>
+        <li><strong>Record uncertainty.</strong> Write what is observed, what is inferred, what is stale, and what coverage gaps can explain missing signals. Absence of a sensor is not proof of calm.</li>
+        <li><strong>Set the follow-up or escalation.</strong> Choose routine watch, deepen dossier, enable Pro alerting, or automate via API/MCP. Continue into the exact product state below rather than the generic homepage.</li>
+      </ol>
+
+      <h2>Product proof used by this workflow</h2>
+      <ul>
+        <li>Country Instability Index and Country Resilience Index on crawlable country pages and in the live dashboard country brief.</li>
+        <li>Country brief dossier with component breakdown and infrastructure context.</li>
+        <li>Hotspot trends, keyword monitors, and convergence cues for daily watch.</li>
+        <li>Optional Pro notification channels for automated watch.</li>
+        <li>Optional API and MCP <code>get_country_risk</code> / country-brief tools for programmable checks.</li>
+      </ul>
+
+      <h2>Worked example: five-country supplier footprint</h2>
+      <p>Suppose exposure is Taiwan (semiconductors), Mexico (assembly), Poland (logistics), Egypt (Suez and cable landings), and Vietnam (electronics).</p>
+      <p>Baseline reading places Taiwan in a moderate-instability / high-resilience quadrant where a single chokepoint dominates, while Egypt sits in a more fragile calm. The monitoring decision changes when Taiwan Strait or Suez signals move, or when a supplier-city keyword monitor fires — not when a generic “regional tension” headline repeats. The analyst leaves the session with a dated note, threshold watchers, and an opened Taiwan country brief rather than a vague “keep an eye on Asia” reminder.</p>
+
+      <h2>Provenance, freshness, and limits</h2>
+      <ul>
+        <li><strong>Provenance:</strong> CII/CRI methodology pages and country corpus pages disclose inputs; treat blog methodology posts as supporting editorial.</li>
+        <li><strong>Freshness:</strong> live instability updates continuously in product; resilience snapshots refresh on a published cadence. Always record observation time in the monitoring note.</li>
+        <li><strong>Blind spots:</strong> media-based event data can lag or miss closed societies; multipliers and baselines are model judgments; prediction markets are forecasts, not observations.</li>
+        <li><strong>What World Monitor cannot prove:</strong> intent, classified activity, or that a quiet sensor means a quiet ground truth.</li>
+      </ul>
+
+      <h2>Exact next action</h2>
+      <p>Open the Taiwan country brief in the live dashboard to continue the worked example, then swap the country code for your own exposure list.</p>
+      <p><a class="cta" data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="monitor-country-risk" data-umami-event-content-campaign="monitor-country-risk" data-umami-event-destination="dashboard" data-umami-event-content-destination="dashboard" data-umami-event-placement="use-case-cta-dashboard" data-umami-event-content-placement="use-case-cta-dashboard" data-dashboard-link href="/dashboard?country=TW&amp;expanded=1&amp;wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=monitor-country-risk&amp;wm_content_destination=dashboard&amp;wm_content_placement=use-case-cta-dashboard&amp;utm_source=seo-use-case">Open Taiwan country brief →</a></p>
+      <p>Secondary handoffs when they continue this workflow:</p>
+      <ul class="related">
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="monitor-country-risk" data-umami-event-content-campaign="monitor-country-risk" data-umami-event-destination="pro" data-umami-event-content-destination="pro" data-umami-event-placement="use-case-cta-pro" data-umami-event-content-placement="use-case-cta-pro" href="/pro?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=monitor-country-risk&amp;wm_content_destination=pro&amp;wm_content_placement=use-case-cta-pro&amp;utm_source=seo-use-case">Pro alerting</a></li>
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="monitor-country-risk" data-umami-event-content-campaign="monitor-country-risk" data-umami-event-destination="api" data-umami-event-content-destination="api" data-umami-event-placement="use-case-cta-api" data-umami-event-content-placement="use-case-cta-api" href="/docs/api-reference?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=monitor-country-risk&amp;wm_content_destination=api&amp;wm_content_placement=use-case-cta-api&amp;utm_source=seo-use-case">API reference</a></li>
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="monitor-country-risk" data-umami-event-content-campaign="monitor-country-risk" data-umami-event-destination="mcp" data-umami-event-content-destination="mcp" data-umami-event-placement="use-case-cta-mcp" data-umami-event-content-placement="use-case-cta-mcp" href="/docs/mcp-quickstart?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=monitor-country-risk&amp;wm_content_destination=mcp&amp;wm_content_placement=use-case-cta-mcp&amp;utm_source=seo-use-case">MCP quickstart</a></li>
+      </ul>
+
+      <h2>Supporting material</h2>
+      <ul class="related">
+        <li><a href="/use-cases/">All use cases</a></li>
+        <li><a href="/countries/">Country risk and resilience corpus</a></li>
+        <li><a href="/blog/posts/country-risk-monitoring-workflow-for-analysts/">Editorial workflow article</a></li>
+        <li><a href="/blog/posts/country-instability-index-methodology-explained/">CII methodology</a></li>
+        <li><a href="/docs/methodology/country-resilience-index">CRI methodology</a></li>
+      </ul>
+      <p class="source">Canonical treatment (#6849): this page owns the evergreen task framing. <a href="/countries/">/countries/</a> remains the live evidence surface. The blog workflow article remains distinct supporting editorial — not a duplicate indexable procedure.</p>
+    </main>
+    <footer><script async defer src="https://abacus.worldmonitor.app/script.js" data-website-id="e8800335-16bc-4241-a133-0eb28c07c832" data-domains="worldmonitor.app,www.worldmonitor.app,happy.worldmonitor.app" nonce="wm-static-bootstrap"></script>World Monitor use-case corpus. Evergreen workflows use committed product evidence; live API results belong on dashboard and country pages.</footer>
+    
+    <script nonce="wm-static-bootstrap">(() => {
+  const PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+  const rewrite = (anchor) => {
+    try {
+      const url = new URL(anchor.getAttribute('href'), window.location.origin);
+      const incoming = new URLSearchParams(window.location.search);
+      for (const name of PARAMS) {
+        if (url.searchParams.has(name)) continue;
+        const value = incoming.get(name);
+        if (value !== null) url.searchParams.set(name, value.slice(0, 100));
+      }
+      anchor.setAttribute('href', url.pathname + url.search + url.hash);
+    } catch (_) { /* keep the build-time href */ }
+  };
+  document.querySelectorAll('[data-use-case-handoff]').forEach(rewrite);
+})();</script>
+  </body>
+</html>

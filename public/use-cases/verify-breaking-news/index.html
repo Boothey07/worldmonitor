@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Verify Breaking News | World Monitor Use Cases</title>
+    <meta name="description" content="Verify a breaking claim with World Monitor: capture it, assess sources, check independent signals, record contradictions, then take a qualified next action.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://www.worldmonitor.app/use-cases/verify-breaking-news/">
+    <meta name="lastmod" content="2026-08-18">
+    
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Verify Breaking News | World Monitor Use Cases">
+    <meta property="og:description" content="Verify a breaking claim with World Monitor: capture it, assess sources, check independent signals, record contradictions, then take a qualified next action.">
+    <meta property="og:url" content="https://www.worldmonitor.app/use-cases/verify-breaking-news/">
+    <meta property="og:site_name" content="World Monitor">
+    <meta property="og:image" content="https://www.worldmonitor.app/favico/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="World Monitor — real-time global intelligence dashboard with live markets, geopolitical data, and infrastructure monitoring">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Verify Breaking News | World Monitor Use Cases">
+    <meta name="twitter:description" content="Verify a breaking claim with World Monitor: capture it, assess sources, check independent signals, record contradictions, then take a qualified next action.">
+    <meta name="twitter:image" content="https://www.worldmonitor.app/favico/og-image.png">
+    <meta name="twitter:image:alt" content="World Monitor — real-time global intelligence dashboard with live markets, geopolitical data, and infrastructure monitoring">
+    <meta name="twitter:site" content="@worldmonitorai">
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"Verify breaking news","description":"Verify a breaking claim with World Monitor: capture it, assess sources, check independent signals, record contradictions, then take a qualified next action.","url":"https://www.worldmonitor.app/use-cases/verify-breaking-news/","inLanguage":"en-US","dateModified":"2026-08-18"}</script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://www.worldmonitor.app/"},{"@type":"ListItem","position":2,"name":"Use cases","item":"https://www.worldmonitor.app/use-cases/"},{"@type":"ListItem","position":3,"name":"Verify breaking news","item":"https://www.worldmonitor.app/use-cases/verify-breaking-news/"}]}</script>
+    <style>
+      :root { color-scheme: dark; --bg: #050807; --panel: #0c1210; --text: #eef8f0; --muted: #a8b8ad; --line: #1b2b22; --accent: #4ade80; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      header, main, footer { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+      header { padding-top: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+      nav { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 14px; }
+      nav a { display: inline-flex; align-items: center; min-height: 44px; }
+      main { padding-top: 36px; padding-bottom: 52px; }
+      h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1; margin: 0 0 16px; letter-spacing: 0; }
+      h2 { margin-top: 36px; font-size: 22px; }
+      p { color: var(--muted); }
+      .lede { font-size: 18px; max-width: 760px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 24px; }
+      .card, .metric { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: var(--panel); }
+      .metric strong { display: block; font-size: 28px; color: var(--text); }
+      .metric small { display: block; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+      .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; font-weight: 700; }
+      .cta { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; padding: 13px 18px; border-radius: 8px; background: var(--accent); color: #04170c; font-weight: 700; font-size: 15px; }
+      .cta:hover { text-decoration: none; filter: brightness(1.08); }
+      .live-tool { margin-top: 28px; padding: 20px; border: 1px solid #28543a; border-radius: 12px; background: linear-gradient(145deg, #0e1712, #09100c); }
+      .live-tool h2 { margin: 3px 0 0; }
+      .live-tool .grid { margin-top: 18px; }
+      .tool-head, .tool-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+      .tool-note { max-width: 760px; margin-bottom: 0; }
+      .tool-meta { margin-top: 16px; color: var(--muted); font-size: 13px; }
+      .live-status { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; font-weight: 700; }
+      .live-tool[data-state="ready"] .live-status { border-color: #28543a; color: var(--accent); }
+      .live-tool[data-state="partial"] .live-status { border-color: #7c6322; color: #fde68a; }
+      .live-tool[data-state="error"] .live-status { border-color: #6f3b3b; color: #fca5a5; }
+      .refresh { border: 1px solid var(--line); border-radius: 7px; padding: 12px 14px; background: #121d16; color: var(--text); cursor: pointer; font: inherit; }
+      .refresh:hover:not(:disabled) { border-color: var(--accent); }
+      .refresh:disabled { cursor: wait; opacity: 0.55; }
+      .tool-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+      .tool-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+      .tool-controls select { min-width: 240px; border: 1px solid var(--line); border-radius: 7px; padding: 12px 34px 12px 12px; background: #121d16; color: var(--text); font: inherit; }
+      .result-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+      .result-list li { border-left: 2px solid var(--line); padding: 8px 12px; color: var(--muted); font-size: 14px; }
+      .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 18px; }
+      .split > section { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: var(--panel); }
+      .split h3 { margin: 0; font-size: 18px; }
+      .split .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split .metric strong { font-size: 22px; }
+      .routes { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 8px; }
+      .routes li { border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; background: var(--panel); color: var(--text); font-size: 14px; }
+      .routes .vol { color: var(--muted); }
+      .domains { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      .card.domain p { margin: 8px 0 12px; font-size: 14px; }
+      .card.domain .providers { display: flex; flex-wrap: wrap; gap: 6px; }
+      .card.domain .providers span { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--muted); font-size: 12px; }
+      .card.domain:hover { border-color: var(--accent); text-decoration: none; }
+      .related { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 0 20px; }
+      .related a { display: inline-flex; align-items: center; min-height: 44px; }
+      .source { margin-top: 34px; font-size: 13px; color: var(--muted); }
+      table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 14px; }
+      caption { caption-side: top; text-align: left; color: var(--muted); font-size: 13px; padding-bottom: 8px; }
+      th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+      th { color: var(--muted); font-weight: 600; background: var(--panel); }
+      td data { color: var(--text); }
+      figure { margin: 20px 0 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+      figcaption { margin-top: 10px; color: var(--muted); font-size: 13px; }
+      blockquote { margin: 16px 0 0; padding: 12px 16px; border-left: 2px solid var(--accent); background: var(--panel); border-radius: 0 8px 8px 0; }
+      blockquote p { margin: 0; color: var(--text); font-size: 14px; }
+      footer { border-top: 1px solid var(--line); padding-top: 20px; padding-bottom: 28px; color: var(--muted); font-size: 13px; }
+
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Primary">
+        <a href="/">World Monitor</a>
+        <a href="/sources/">Sources</a>
+        <a href="/countries/">Countries</a>
+        <a href="/chokepoints/">Chokepoints</a>
+        <a href="/crises/">Crises</a>
+        <a href="/tools/">Live tools</a>
+        <a href="/research/">Research</a>
+        <a href="/use-cases/">Use cases</a>
+        <a href="/reference/changelog/">Changelog</a>
+        <a href="/blog/glossary/">Glossary</a>
+      </nav>
+    </header>
+    <main>
+      <p class="eyebrow">Use case</p>
+      <h1>Verify breaking news</h1>
+      <p class="lede"><strong>Direct answer:</strong> treat a viral claim as a hypothesis. Capture the exact claim and window, assess the source chain, test only the World Monitor signal families that can support or contradict it, record contradictions and coverage gaps, then assign a qualified outcome before you brief anyone.</p>
+
+      <h2>Who this is for</h2>
+      <p>Newsroom researchers, OSINT analysts, duty-of-care officers, and desk editors who need a bounded verification record in minutes — not a rewritten article and not a generic homepage tour.</p>
+      <p><strong>Not for:</strong> sole basis for emergency, military, legal, medical, or safety decisions. World Monitor aggregates public and licensed signals; correlated sensors are evidence, not certainty, and this workflow does not certify that an event is true.</p>
+
+      <h2>Workflow inputs and output</h2>
+      <ul>
+        <li><strong>User:</strong> someone accountable for publishing, escalating, or briefing on a developing claim.</li>
+        <li><strong>Decision:</strong> whether the claim is supported, contradicted, unresolved, or stale relative to available evidence.</li>
+        <li><strong>Trigger:</strong> a social post, tip, wire alert, or recycled video that needs a fast independent check.</li>
+        <li><strong>Expected output:</strong> a dated verification note with claim text, source assessment, signal checks, contradictions, uncertainty, and the next product action.</li>
+      </ul>
+
+      <h2>End-to-end workflow</h2>
+      <ol>
+        <li><strong>Capture the claim precisely.</strong> Write the exact wording, claimed location, time window, and decision deadline. Separate what is asserted from what is merely implied.</li>
+        <li><strong>Assess the original source.</strong> Note publication time, first-hand vs derivative media, and the repost chain. Treat wire pickup as reach, not independent confirmation.</li>
+        <li><strong>Check news velocity without equating repetition to proof.</strong> Look at topic velocity, hotspot movement, and outlet diversity. Many copies of one video are still one source family.</li>
+        <li><strong>Test only relevant independent signals.</strong> Use AIS/maritime, aviation/NOTAMs, FIRMS thermal, seismic, connectivity/outages, webcams, or country context when the claim’s physics or geography would leave a fingerprint. Skip layers that cannot speak to this claim.</li>
+        <li><strong>Record freshness, fit, and contradictions.</strong> Log observation time, spatial/temporal mismatch, missing coverage that can explain a quiet sensor, and any signal that conflicts with the claim.</li>
+        <li><strong>Assign a qualified outcome.</strong> Choose supported, contradicted, unresolved, or stale — with uncertainty visible — then continue into the exact dashboard, Pro alert, API, or MCP action below.</li>
+      </ol>
+
+      <h2>Product proof used by this workflow</h2>
+      <ul>
+        <li>Live map layers for AIS density and dark-ship cues, flights/military aviation, fires/thermal, natural hazards, outages, and hotspot escalation.</li>
+        <li>Geographic convergence cues when multiple independent event types cluster in one cell.</li>
+        <li>Country briefs and instability context to calibrate priors — not to validate the claim alone.</li>
+        <li>Optional Pro notification channels for continuing watch after the first pass.</li>
+        <li>Optional API and MCP tools for maritime, conflict, news, and related programmable checks.</li>
+      </ul>
+
+      <h2>Worked example: Gulf port explosion claim</h2>
+      <p>A social post claims a major explosion at a Gulf port with operations halted. Capture the exact port name, claimed minute, and the video’s alleged capture time.</p>
+      <p><strong>Supporting path:</strong> AIS cells near the berth show ships holding offshore, FIRMS records a thermal anomaly inside the claimed window, and a nearby webcam shows an abnormal skyline. The note records “supported pending primary reporting” with observation timestamps.</p>
+      <p><strong>Uncertainty path:</strong> the same claim with only social reposts, no AIS anomaly in a thinly covered AIS region, no thermal hit on the next satellite pass, and a silent seismic network near a dense station field becomes “unresolved / possibly recycled.” Absence of AIS here is weak evidence of calm, not proof the event did not occur.</p>
+
+      <h2>Provenance, freshness, and limits</h2>
+      <ul>
+        <li><strong>Provenance:</strong> AIS aggregators, NASA FIRMS, USGS seismic catalogs, flight/NOTAM feeds, Cloudflare Radar-style connectivity signals, and World Monitor convergence scoring each disclose different publishers and coverage.</li>
+        <li><strong>Freshness:</strong> AIS and flights can move in minutes; thermal passes can lag hours; news velocity can spike before sensors settle. Always stamp the verification note with observation time.</li>
+        <li><strong>Blind spots:</strong> thin AIS regions, small events below sensor thresholds, cloud-obscured thermal passes, webcam geometry, and claims about intent rather than physics.</li>
+        <li><strong>What World Monitor cannot prove:</strong> that a quiet map means nothing happened, or that repeated headlines are independent confirmations.</li>
+      </ul>
+
+      <h2>Exact next action</h2>
+      <p>Open the MENA verification map with AIS, flights, fires, outages, hotspots, natural, and military layers for a 24-hour window, then retarget the view to the claimed coordinates.</p>
+      <p><a class="cta" data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="verify-breaking-news" data-umami-event-content-campaign="verify-breaking-news" data-umami-event-destination="dashboard" data-umami-event-content-destination="dashboard" data-umami-event-placement="use-case-cta-dashboard" data-umami-event-content-placement="use-case-cta-dashboard" data-dashboard-link href="/dashboard?view=mena&amp;layers=ais%2Cflights%2Cfires%2Coutages%2Chotspots%2Cnatural%2Cmilitary&amp;timeRange=24h&amp;wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=verify-breaking-news&amp;wm_content_destination=dashboard&amp;wm_content_placement=use-case-cta-dashboard&amp;utm_source=seo-use-case">Open verification map layers →</a></p>
+      <p>Secondary handoffs when they continue this workflow:</p>
+      <ul class="related">
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="verify-breaking-news" data-umami-event-content-campaign="verify-breaking-news" data-umami-event-destination="pro" data-umami-event-content-destination="pro" data-umami-event-placement="use-case-cta-pro" data-umami-event-content-placement="use-case-cta-pro" href="/pro?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=verify-breaking-news&amp;wm_content_destination=pro&amp;wm_content_placement=use-case-cta-pro&amp;utm_source=seo-use-case">Pro alerting</a></li>
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="verify-breaking-news" data-umami-event-content-campaign="verify-breaking-news" data-umami-event-destination="api" data-umami-event-content-destination="api" data-umami-event-placement="use-case-cta-api" data-umami-event-content-placement="use-case-cta-api" href="/docs/api-reference?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=verify-breaking-news&amp;wm_content_destination=api&amp;wm_content_placement=use-case-cta-api&amp;utm_source=seo-use-case">API reference</a></li>
+        <li><a data-use-case-handoff data-wm-content-link data-umami-event="use-case-product-cta-click" data-umami-event-source="worldmonitor-use-cases" data-umami-event-content-source="worldmonitor-use-cases" data-umami-event-medium="owned-content" data-umami-event-content-medium="owned-content" data-umami-event-campaign="verify-breaking-news" data-umami-event-content-campaign="verify-breaking-news" data-umami-event-destination="mcp" data-umami-event-content-destination="mcp" data-umami-event-placement="use-case-cta-mcp" data-umami-event-content-placement="use-case-cta-mcp" href="/docs/mcp-quickstart?wm_content_source=worldmonitor-use-cases&amp;wm_content_medium=owned-content&amp;wm_content_campaign=verify-breaking-news&amp;wm_content_destination=mcp&amp;wm_content_placement=use-case-cta-mcp&amp;utm_source=seo-use-case">MCP quickstart</a></li>
+      </ul>
+
+      <h2>Supporting material</h2>
+      <ul class="related">
+        <li><a href="/use-cases/">All use cases</a></li>
+        <li><a href="/use-cases/monitor-country-risk/">Monitor country risk</a></li>
+        <li><a href="/blog/posts/verify-breaking-news-osint-workflow-journalists/">OSINT editorial workflow article</a></li>
+        <li><a href="/countries/">Country risk and resilience corpus</a></li>
+        <li><a href="/docs/natural-disasters">Natural disaster tracking</a></li>
+      </ul>
+      <p class="source">Canonical treatment (#6850): this page owns the evergreen verification procedure. The <a href="/blog/posts/verify-breaking-news-osint-workflow-journalists/">OSINT blog article</a> remains dated supporting editorial with minute-by-minute narrative — not a duplicate indexable task page. No redirect.</p>
+    </main>
+    <footer><script async defer src="https://abacus.worldmonitor.app/script.js" data-website-id="e8800335-16bc-4241-a133-0eb28c07c832" data-domains="worldmonitor.app,www.worldmonitor.app,happy.worldmonitor.app" nonce="wm-static-bootstrap"></script>World Monitor use-case corpus. Evergreen workflows use committed product evidence; live API results belong on dashboard and country pages.</footer>
+    
+    <script nonce="wm-static-bootstrap">(() => {
+  const PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+  const rewrite = (anchor) => {
+    try {
+      const url = new URL(anchor.getAttribute('href'), window.location.origin);
+      const incoming = new URLSearchParams(window.location.search);
+      for (const name of PARAMS) {
+        if (url.searchParams.has(name)) continue;
+        const value = incoming.get(name);
+        if (value !== null) url.searchParams.set(name, value.slice(0, 100));
+      }
+      anchor.setAttribute('href', url.pathname + url.search + url.hash);
+    } catch (_) { /* keep the build-time href */ }
+  };
+  document.querySelectorAll('[data-use-case-handoff]').forEach(rewrite);
+})();</script>
+  </body>
+</html>

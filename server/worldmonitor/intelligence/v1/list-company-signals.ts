@@ -161,7 +161,7 @@ function summarize(signals: CompanySignal[]): SignalSummary {
     totalSignals: signals.length,
     byType,
     strongestSignal: strongest,
-    signalDiversity: sources.size,
+    signalDiversity: Object.keys(byType).length,
   };
 }
 
