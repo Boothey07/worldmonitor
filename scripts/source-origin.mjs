@@ -184,6 +184,10 @@ const HOST_ORIGINS = Object.freeze({
   'api.cloudflare.com': 'US',
   'api.abuseipdb.com': 'US',
   'api.alternative.me': null,
+  // Scanner normalizes to the apex domain when emitting inventory hosts;
+  // keep the apex alias beside the API-subdomain origin or resolveSourceOrigin
+  // throws "needs a catalog origin country" on every regeneration.
+  'aviationstack.com': 'GB',
   'api.aviationstack.com': 'GB',
   'api.coingecko.com': 'MY',
   'api.coinpaprika.com': 'PL',
