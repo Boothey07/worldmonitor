@@ -1586,7 +1586,16 @@ export function sourceAttributionLedgerStats(manifest, { observedHosts } = {}) {
 
 export function sourceAttributionStats(inventory, manifest) {
   const validationErrors = validateManifest(inventory, manifest);
-  if (validationErrors.length) throw new Error(`source-attribution: invalid manifest (${validationErrors.join('; ')})`);
+  if (validationErrors.length) {
+    if (process.env.WM_ATTRIBUTION_WARN === '1') {
+      console.warn(
+        `[attribution] WM_ATTRIBUTION_WARN: ${validationErrors.length} drifted entries; building anyway. First few:` +
+          '\n - ' + validationErrors.slice(0, 4).join('\n - '),
+      );
+      return sourceAttributionLedgerStats(manifest);
+    }
+    throw new Error(`source-attribution: invalid manifest (${validationErrors.join('; ')})`);
+  }
   return sourceAttributionLedgerStats(manifest, { observedHosts: inventory.length });
 }
 
