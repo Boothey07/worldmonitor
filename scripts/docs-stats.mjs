@@ -361,8 +361,24 @@ function parseMcpAppsInventory({
 // cannot silently pass against the argument literal.
 const OBJECT_WRAPPER_IDENTIFIERS = new Set(['Object.freeze', 'Object.seal']);
 
+// Self-host (#bundle-regen): docker/build-handlers.mjs re-emits bundles whose
+// declaration keyword (var) and string quotes (double) drift from the artifacts
+// the upstream contract scanners were authored against. Normalizing bundle text
+// to the canonical style BEFORE parsing keeps every downstream regex valid for
+// both committed artifacts and any future regeneration.
+function normalizeBundleQuotes(sourceText) {
+  return sourceText.replace(/"((?:[^"\\]|\\.)*)"/g, (_m, inner) =>
+    `'${inner.replace(/'/g, "\\'")}'`,
+  );
+}
+
 function parseObjectBlockBody(source, declaration, label) {
-  const body = extractAssignedObjectBlock(source, declaration, OBJECT_WRAPPER_IDENTIFIERS);
+  const name = declaration.split(/\s+/).pop();
+  let body = null;
+  for (const keyword of ['const', 'var', 'let']) {
+    body = extractAssignedObjectBlock(normalizeBundleQuotes(source), `${keyword} ${name}`, OBJECT_WRAPPER_IDENTIFIERS);
+    if (body) break;
+  }
   if (body === null) {
     throw new Error(`docs-stats: could not parse ${label}`);
   }
@@ -372,7 +388,7 @@ function parseObjectBlockBody(source, declaration, label) {
 function parseCacheHeaderMap(source, name) {
   const body = parseObjectBlockBody(source, `const ${name}`, `${name} in api/bootstrap.js`);
   const map = Object.fromEntries(
-    [...body.matchAll(/^ {2}(\w+):\s*'([^']+)',$/gm)].map((m) => [m[1], m[2]]),
+    [...body.matchAll(/^ {2}(\w+):\s*'([^']+)',?\s*$/gm)].map((m) => [m[1], m[2]]),
   );
   for (const tier of ['fast', 'slow']) {
     if (!map[tier]) throw new Error(`docs-stats: ${name} in api/bootstrap.js is missing the ${tier} tier`);
@@ -389,7 +405,8 @@ function cacheDirective(headerValue, name, label) {
   return found;
 }
 
-function parseBootstrapCacheContract(source = read('api/bootstrap.js')) {
+function parseBootstrapCacheContract(inputSource = read('api/bootstrap.js')) {
+  const source = normalizeBundleQuotes(inputSource);
   const tierCache = parseCacheHeaderMap(source, 'TIER_CACHE');
   const tierCdnCache = parseCacheHeaderMap(source, 'TIER_CDN_CACHE');
 
@@ -397,7 +414,7 @@ function parseBootstrapCacheContract(source = read('api/bootstrap.js')) {
     source, 'const ON_DEMAND_CACHE_PROFILES', 'ON_DEMAND_CACHE_PROFILES in api/bootstrap.js',
   );
   const onDemandProfiles = {};
-  for (const [, key, body] of profilesBody.matchAll(/^ {2}(\w+):\s*\{([\s\S]*?)^ {2}\},$/gm)) {
+  for (const [, key, body] of profilesBody.matchAll(/^ {2}(\w+):\s*\{([\s\S]*?)^\s*\},?[ \t]*$/gm)) {
     const browser = body.match(/browser:\s*'([^']+)'/)?.[1];
     const cdn = body.match(/cdn:\s*'([^']+)'/)?.[1];
     if (!browser || !cdn) {
@@ -443,7 +460,7 @@ function parseBootstrapCacheContract(source = read('api/bootstrap.js')) {
   // `|| '...'` elsewhere in the module, reporting a confident wrong value.
   // Bounding them to the emitter means a removed fallback throws.
   const defaultCacheControl = successBlock.match(/const cacheControl = [\s\S]*?\|\|\s*'([^']+)';/)?.[1];
-  const defaultCdnTier = successBlock.match(/'CDN-Cache-Control':[\s\S]*?\|\|\s*TIER_CDN_CACHE\.(\w+),/)?.[1];
+  const defaultCdnTier = successBlock.match(/'CDN-Cache-Control':[\s\S]*?\|\|\s*TIER_CDN_CACHE\.(\w+),?/)?.[1];
   if (!defaultCacheControl || !defaultCdnTier || !tierCdnCache[defaultCdnTier]) {
     throw new Error('docs-stats: could not parse the tier-less public cache fallbacks in api/bootstrap.js');
   }

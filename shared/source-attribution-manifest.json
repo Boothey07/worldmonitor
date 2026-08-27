@@ -300,6 +300,9 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "api/skills/fetch-agentskills.js"
+        },
+        {
           "path": "api/skills/fetch-agentskills.ts"
         }
       ]
@@ -561,10 +564,25 @@
           "path": "api/_usage-telemetry.js"
         },
         {
+          "path": "api/a2a.js"
+        },
+        {
+          "path": "api/ask.js"
+        },
+        {
           "path": "api/aviation/v1/[rpc].js"
         },
         {
           "path": "api/batch/v1/[rpc].js"
+        },
+        {
+          "path": "api/bootstrap.js"
+        },
+        {
+          "path": "api/brief/share-url.js"
+        },
+        {
+          "path": "api/chat-analyst.js"
         },
         {
           "path": "api/climate/v1/[rpc].js"
@@ -579,10 +597,16 @@
           "path": "api/cyber/v1/[rpc].js"
         },
         {
+          "path": "api/discord/oauth/start.js"
+        },
+        {
           "path": "api/displacement/v1/[rpc].js"
         },
         {
           "path": "api/economic/v1/[rpc].js"
+        },
+        {
+          "path": "api/embed/entitlement.js"
         },
         {
           "path": "api/forecast/v1/[rpc].js"
@@ -603,6 +627,21 @@
           "path": "api/intelligence/v1/[rpc].js"
         },
         {
+          "path": "api/internal/brief-why-matters.js"
+        },
+        {
+          "path": "api/internal/mcp-grant-context.js"
+        },
+        {
+          "path": "api/internal/mcp-grant-mint.js"
+        },
+        {
+          "path": "api/invalidate-user-api-key-cache.js"
+        },
+        {
+          "path": "api/latest-brief.js"
+        },
+        {
           "path": "api/leads/v1/[rpc].js"
         },
         {
@@ -612,6 +651,48 @@
           "path": "api/market/v1/[rpc].js"
         },
         {
+          "path": "api/mcp-proxy.js"
+        },
+        {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/auth.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/free-account-allowance.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/quota.js"
+        },
+        {
+          "path": "api/mcp/registry/company-intel-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/nlp-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
+        {
+          "path": "api/mcp/usage.js"
+        },
+        {
+          "path": "api/me/entitlement.js"
+        },
+        {
           "path": "api/military/v1/[rpc].js"
         },
         {
@@ -619,6 +700,18 @@
         },
         {
           "path": "api/news/v1/[rpc].js"
+        },
+        {
+          "path": "api/notification-channels.js"
+        },
+        {
+          "path": "api/notify.js"
+        },
+        {
+          "path": "api/oauth/authorize-pro.js"
+        },
+        {
+          "path": "api/oauth/token.js"
         },
         {
           "path": "api/positive-events/v1/[rpc].js"
@@ -645,10 +738,28 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
+          "path": "api/slack/oauth/start.js"
+        },
+        {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "api/thermal/v1/[rpc].js"
@@ -660,10 +771,31 @@
           "path": "api/unrest/v1/[rpc].js"
         },
         {
+          "path": "api/user/mcp-quota.js"
+        },
+        {
+          "path": "api/user/mcp-revoke.js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
+        },
+        {
+          "path": "api/v2/shipping/webhooks/[subscriberId].js"
+        },
+        {
+          "path": "api/v2/shipping/webhooks/[subscriberId]/[action].js"
+        },
+        {
           "path": "api/webcam/v1/[rpc].js"
         },
         {
+          "path": "api/widget-agent.js"
+        },
+        {
           "path": "api/wildfire/v1/[rpc].js"
+        },
+        {
+          "path": "api/wm-session.js"
         },
         {
           "path": "scripts/lib/llm-telemetry.cjs"
@@ -712,6 +844,12 @@
           "path": "api/batch/v1/[rpc].js"
         },
         {
+          "path": "api/brief/share-url.js"
+        },
+        {
+          "path": "api/chat-analyst.js"
+        },
+        {
           "path": "api/climate/v1/[rpc].js"
         },
         {
@@ -721,7 +859,16 @@
           "path": "api/consumer-prices/v1/[rpc].js"
         },
         {
+          "path": "api/create-checkout.js"
+        },
+        {
+          "path": "api/customer-portal.js"
+        },
+        {
           "path": "api/cyber/v1/[rpc].js"
+        },
+        {
+          "path": "api/discord/oauth/start.js"
         },
         {
           "path": "api/displacement/v1/[rpc].js"
@@ -748,6 +895,18 @@
           "path": "api/intelligence/v1/[rpc].js"
         },
         {
+          "path": "api/internal/mcp-grant-context.js"
+        },
+        {
+          "path": "api/internal/mcp-grant-mint.js"
+        },
+        {
+          "path": "api/invalidate-user-api-key-cache.js"
+        },
+        {
+          "path": "api/latest-brief.js"
+        },
+        {
           "path": "api/leads/v1/[rpc].js"
         },
         {
@@ -755,6 +914,12 @@
         },
         {
           "path": "api/market/v1/[rpc].js"
+        },
+        {
+          "path": "api/mcp-proxy.js"
+        },
+        {
+          "path": "api/me/entitlement.js"
         },
         {
           "path": "api/military/v1/[rpc].js"
@@ -766,6 +931,12 @@
           "path": "api/news/v1/[rpc].js"
         },
         {
+          "path": "api/notification-channels.js"
+        },
+        {
+          "path": "api/notify.js"
+        },
+        {
           "path": "api/positive-events/v1/[rpc].js"
         },
         {
@@ -773,6 +944,9 @@
         },
         {
           "path": "api/radiation/v1/[rpc].js"
+        },
+        {
+          "path": "api/referral/me.js"
         },
         {
           "path": "api/research/v1/[rpc].js"
@@ -790,10 +964,28 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
+          "path": "api/slack/oauth/start.js"
+        },
+        {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "api/thermal/v1/[rpc].js"
@@ -805,7 +997,28 @@
           "path": "api/unrest/v1/[rpc].js"
         },
         {
+          "path": "api/user-prefs.js"
+        },
+        {
+          "path": "api/user/mcp-quota.js"
+        },
+        {
+          "path": "api/user/mcp-revoke.js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
+        },
+        {
+          "path": "api/v2/shipping/webhooks/[subscriberId].js"
+        },
+        {
+          "path": "api/v2/shipping/webhooks/[subscriberId]/[action].js"
+        },
+        {
           "path": "api/webcam/v1/[rpc].js"
+        },
+        {
+          "path": "api/widget-agent.js"
         },
         {
           "path": "api/wildfire/v1/[rpc].js"
@@ -1054,6 +1267,12 @@
       "references": [
         {
           "path": "api/_github-release.js"
+        },
+        {
+          "path": "api/download.js"
+        },
+        {
+          "path": "api/version.js"
         },
         {
           "path": "scripts/dispatch-stale-railway-reconcile.mjs"
@@ -1600,13 +1819,34 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/a2a.js"
+        },
+        {
           "path": "api/a2a.ts"
+        },
+        {
+          "path": "api/internal/mcp-grant-mint.js"
         },
         {
           "path": "api/internal/mcp-grant-mint.ts"
         },
         {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/downstream.js"
+        },
+        {
           "path": "api/mcp/downstream.ts"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
         },
         {
           "path": "scripts/ais-relay.cjs"
@@ -2457,6 +2697,9 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/brief/carousel/[userId]/[issueDate]/[page].js"
+        },
+        {
           "path": "scripts/ais-relay.cjs"
         },
         {
@@ -2553,6 +2796,15 @@
       ]
     },
     {
+      "host": "chatgpt.com",
+      "provider": "ChatGPT link",
+      "kind": "structured",
+      "observed": false,
+      "license": "Excluded: documentation/UI link",
+      "attribution": "Excluded from the provider count: UI link, not an ingested source.",
+      "status": "excluded"
+    },
+    {
       "host": "chathamhouse.org",
       "provider": "chathamhouse.org",
       "kind": "feed",
@@ -2604,6 +2856,24 @@
       ]
     },
     {
+      "host": "claude.ai",
+      "provider": "Claude link",
+      "kind": "structured",
+      "observed": false,
+      "license": "Excluded: documentation/UI link",
+      "attribution": "Excluded from the provider count: UI link, not an ingested source.",
+      "status": "excluded"
+    },
+    {
+      "host": "claude.com",
+      "provider": "Claude link",
+      "kind": "structured",
+      "observed": false,
+      "license": "Excluded: documentation/UI link",
+      "attribution": "Excluded from the provider count: UI link, not an ingested source.",
+      "status": "excluded"
+    },
+    {
       "host": "climate.copernicus.eu",
       "provider": "climate.copernicus.eu",
       "kind": "structured",
@@ -2633,7 +2903,16 @@
           "path": "api/leads/v1/[rpc].js"
         },
         {
+          "path": "api/mcp-proxy.js"
+        },
+        {
           "path": "api/mcp-proxy.ts"
+        },
+        {
+          "path": "api/notification-channels.js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
         },
         {
           "path": "server/_shared/email-validation.ts"
@@ -2813,6 +3092,12 @@
       "references": [
         {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "scripts/seed-comtrade-bilateral-hs4.mjs"
@@ -3428,7 +3713,13 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/discord/oauth/callback.js"
+        },
+        {
           "path": "api/discord/oauth/callback.ts"
+        },
+        {
+          "path": "api/discord/oauth/start.js"
         },
         {
           "path": "api/discord/oauth/start.ts"
@@ -3777,6 +4068,33 @@
       "attribution": "SaskAlert, Government of Saskatchewan. https://emergencyalert.saskatchewan.ca/",
       "status": "terms-review",
       "references": [
+        {
+          "path": "api/a2a.js"
+        },
+        {
+          "path": "api/ask.js"
+        },
+        {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/source-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
         {
           "path": "scripts/lib/saskalert.mjs"
         },
@@ -4645,6 +4963,9 @@
           "path": "api/market/v1/[rpc].js"
         },
         {
+          "path": "api/symbol-search.js"
+        },
+        {
           "path": "api/symbol-search.ts"
         },
         {
@@ -4713,6 +5034,15 @@
       "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
       "status": "excluded",
       "references": [
+        {
+          "path": "api/brief/[userId]/[issueDate].js"
+        },
+        {
+          "path": "api/brief/carousel/[userId]/[issueDate]/[page].js"
+        },
+        {
+          "path": "api/brief/public/[hash].js"
+        },
         {
           "path": "server/_shared/brief-render.js"
         }
@@ -6337,10 +6667,25 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "api/thermal/v1/[rpc].js"
@@ -6350,6 +6695,9 @@
         },
         {
           "path": "api/unrest/v1/[rpc].js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
         },
         {
           "path": "api/webcam/v1/[rpc].js"
@@ -6755,6 +7103,12 @@
         },
         {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "server/worldmonitor/infrastructure/v1/get-cable-health.ts"
@@ -7369,6 +7723,15 @@
       "status": "excluded"
     },
     {
+      "host": "opencollective.com",
+      "provider": "opencollective.com",
+      "kind": "structured",
+      "observed": false,
+      "license": "Provider terms for this upstream API/dataset; verify before redistribution",
+      "attribution": "Credit opencollective.com and link to the original upstream API/dataset.",
+      "status": "excluded"
+    },
+    {
       "host": "opendata.adsb.fi",
       "provider": "adsb.fi Open Data",
       "kind": "structured",
@@ -7881,6 +8244,9 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/widget-agent.js"
+        },
+        {
           "path": "api/widget-agent.ts"
         },
         {
@@ -8134,10 +8500,22 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "api/a2a.js"
+        },
+        {
+          "path": "api/analytics-health.js"
+        },
+        {
+          "path": "api/ask.js"
+        },
+        {
           "path": "api/aviation/v1/[rpc].js"
         },
         {
           "path": "api/batch/v1/[rpc].js"
+        },
+        {
+          "path": "api/chat-analyst.js"
         },
         {
           "path": "api/climate/v1/[rpc].js"
@@ -8155,7 +8533,13 @@
           "path": "api/displacement/v1/[rpc].js"
         },
         {
+          "path": "api/docs-mcp.js"
+        },
+        {
           "path": "api/economic/v1/[rpc].js"
+        },
+        {
+          "path": "api/embed/entitlement.js"
         },
         {
           "path": "api/forecast/v1/[rpc].js"
@@ -8176,6 +8560,9 @@
           "path": "api/intelligence/v1/[rpc].js"
         },
         {
+          "path": "api/internal/mcp-grant-mint.js"
+        },
+        {
           "path": "api/leads/v1/[rpc].js"
         },
         {
@@ -8185,6 +8572,36 @@
           "path": "api/market/v1/[rpc].js"
         },
         {
+          "path": "api/mcp-proxy.js"
+        },
+        {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/auth.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/registry/company-intel-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/nlp-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
+        {
           "path": "api/military/v1/[rpc].js"
         },
         {
@@ -8192,6 +8609,21 @@
         },
         {
           "path": "api/news/v1/[rpc].js"
+        },
+        {
+          "path": "api/notify.js"
+        },
+        {
+          "path": "api/oauth/token.js"
+        },
+        {
+          "path": "api/opensky.js"
+        },
+        {
+          "path": "api/oref-alerts.js"
+        },
+        {
+          "path": "api/polymarket.js"
         },
         {
           "path": "api/positive-events/v1/[rpc].js"
@@ -8209,6 +8641,12 @@
           "path": "api/resilience/v1/[rpc].js"
         },
         {
+          "path": "api/reverse-geocode.js"
+        },
+        {
+          "path": "api/rss-proxy.js"
+        },
+        {
           "path": "api/safety/v1/[rpc].js"
         },
         {
@@ -8218,10 +8656,34 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
+          "path": "api/skills/fetch-agentskills.js"
+        },
+        {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
+        },
+        {
+          "path": "api/symbol-search.js"
+        },
+        {
+          "path": "api/telegram-feed.js"
         },
         {
           "path": "api/thermal/v1/[rpc].js"
@@ -8233,10 +8695,22 @@
           "path": "api/unrest/v1/[rpc].js"
         },
         {
+          "path": "api/user-prefs.js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
+        },
+        {
           "path": "api/webcam/v1/[rpc].js"
         },
         {
           "path": "api/wildfire/v1/[rpc].js"
+        },
+        {
+          "path": "api/wm-session.js"
+        },
+        {
+          "path": "api/x-feed.js"
         },
         {
           "path": "scripts/ais-relay.cjs"
@@ -8672,6 +9146,9 @@
       "status": "terms-review",
       "references": [
         {
+          "path": "api/ask.js"
+        },
+        {
           "path": "api/ask.ts"
         },
         {
@@ -9088,7 +9565,13 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/slack/oauth/callback.js"
+        },
+        {
           "path": "api/slack/oauth/callback.ts"
+        },
+        {
+          "path": "api/slack/oauth/start.js"
         },
         {
           "path": "api/slack/oauth/start.ts"
@@ -10918,7 +11401,19 @@
           "path": "api/_agent-metadata.ts"
         },
         {
+          "path": "api/[...notfound].js"
+        },
+        {
+          "path": "api/a2a.js"
+        },
+        {
           "path": "api/a2a.ts"
+        },
+        {
+          "path": "api/agent-auth.js"
+        },
+        {
+          "path": "api/ask.js"
         },
         {
           "path": "api/ask.ts"
@@ -10937,6 +11432,9 @@
         },
         {
           "path": "api/consumer-prices/v1/[rpc].js"
+        },
+        {
+          "path": "api/create-checkout.js"
         },
         {
           "path": "api/cyber/v1/[rpc].js"
@@ -10978,6 +11476,51 @@
           "path": "api/market/v1/[rpc].js"
         },
         {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/auth.js"
+        },
+        {
+          "path": "api/mcp/constants.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/jmespath.js"
+        },
+        {
+          "path": "api/mcp/registry/cache-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/company-intel-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/nlp-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
+        {
+          "path": "api/mcp/ui/registry.js"
+        },
+        {
+          "path": "api/mcp/ui/shell.js"
+        },
+        {
+          "path": "api/mcp/upgrade.js"
+        },
+        {
           "path": "api/military/v1/[rpc].js"
         },
         {
@@ -10987,7 +11530,16 @@
           "path": "api/news/v1/[rpc].js"
         },
         {
+          "path": "api/not-found.js"
+        },
+        {
           "path": "api/not-found.ts"
+        },
+        {
+          "path": "api/oauth-authorization-server.js"
+        },
+        {
+          "path": "api/oauth-protected-resource.js"
         },
         {
           "path": "api/oauth/authorize.js"
@@ -11006,6 +11558,9 @@
         },
         {
           "path": "api/radiation/v1/[rpc].js"
+        },
+        {
+          "path": "api/referral/me.js"
         },
         {
           "path": "api/referral/me.ts"
@@ -11029,6 +11584,18 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
+          "path": "api/seed-contract-probe.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
@@ -11038,6 +11605,12 @@
           "path": "api/supply-chain/v1/[rpc].js"
         },
         {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
+        },
+        {
           "path": "api/thermal/v1/[rpc].js"
         },
         {
@@ -11045,6 +11618,9 @@
         },
         {
           "path": "api/unrest/v1/[rpc].js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
         },
         {
           "path": "api/webcam/v1/[rpc].js"
@@ -11247,10 +11823,25 @@
           "path": "api/scenario/v1/[rpc].js"
         },
         {
+          "path": "api/scenario/v1/run.js"
+        },
+        {
+          "path": "api/scenario/v1/status.js"
+        },
+        {
+          "path": "api/scenario/v1/templates.js"
+        },
+        {
           "path": "api/seismology/v1/[rpc].js"
         },
         {
           "path": "api/supply-chain/v1/[rpc].js"
+        },
+        {
+          "path": "api/supply-chain/v1/country-products.js"
+        },
+        {
+          "path": "api/supply-chain/v1/multi-sector-cost-shock.js"
         },
         {
           "path": "api/thermal/v1/[rpc].js"
@@ -11260,6 +11851,9 @@
         },
         {
           "path": "api/unrest/v1/[rpc].js"
+        },
+        {
+          "path": "api/v2/shipping/[rpc].js"
         },
         {
           "path": "api/webcam/v1/[rpc].js"
@@ -11281,6 +11875,9 @@
       "attribution": "Excluded from the external-provider count: not an ingested upstream dataset.",
       "status": "excluded",
       "references": [
+        {
+          "path": "api/docs-mcp.js"
+        },
         {
           "path": "api/docs-mcp.ts"
         }
@@ -11505,6 +12102,33 @@
       "attribution": "Alberta Emergency Alert, Government of Alberta. https://www.alberta.ca/alberta-emergency-alert.aspx",
       "status": "terms-review",
       "references": [
+        {
+          "path": "api/a2a.js"
+        },
+        {
+          "path": "api/ask.js"
+        },
+        {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/source-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
         {
           "path": "scripts/lib/alberta-emergency-alert.mjs"
         },
@@ -15617,7 +16241,16 @@
       "status": "excluded",
       "references": [
         {
+          "path": "api/[...notfound].js"
+        },
+        {
+          "path": "api/a2a.js"
+        },
+        {
           "path": "api/a2a.ts"
+        },
+        {
+          "path": "api/ask.js"
         },
         {
           "path": "api/ask.ts"
@@ -15627,6 +16260,36 @@
         },
         {
           "path": "api/intelligence/v1/[rpc].js"
+        },
+        {
+          "path": "api/mcp.js"
+        },
+        {
+          "path": "api/mcp/dispatch.js"
+        },
+        {
+          "path": "api/mcp/handler.js"
+        },
+        {
+          "path": "api/mcp/registry/cache-tools.js"
+        },
+        {
+          "path": "api/mcp/registry/index.js"
+        },
+        {
+          "path": "api/mcp/registry/rpc-tools.js"
+        },
+        {
+          "path": "api/mcp/resources/index.js"
+        },
+        {
+          "path": "api/mcp/ui/registry.js"
+        },
+        {
+          "path": "api/mcp/ui/shell.js"
+        },
+        {
+          "path": "api/not-found.js"
         },
         {
           "path": "api/not-found.ts"

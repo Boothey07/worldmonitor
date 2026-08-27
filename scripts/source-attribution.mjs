@@ -978,13 +978,24 @@ export function scanUpstreamHosts(rootDir = ROOT) {
   // References are recorded per file, never per line. A line number is not part
   // of the attribution (which records license posture and required credit), and
   // pinning one made every unrelated edit rewrite the committed manifest.
+  // Bundled handlers inline dependency metadata (license/homepage URLs from
+  // npm packages). Those are not World Monitor sources; scan them out so the
+  // committed ledger stays about data providers we actually consume.
+  const SELF_HOST_SCAN_EXCLUDED_HOSTS = new Set([
+    'opencollective.com', 'chatgpt.com', 'claude.ai', 'claude.com',
+  ]);
   const recordHost = (host, kind, path) => {
+    if (SELF_HOST_SCAN_EXCLUDED_HOSTS.has(host)) return;
     const current = hosts.get(host) || { host, kinds: new Set(), references: [] };
     current.kinds.add(kind);
     if (!current.references.some((reference) => reference.path === path)) current.references.push({ path });
     hosts.set(host, current);
   };
   for (const relativePath of walkSourceFiles(rootDir)) {
+    // Generated aggregation artifacts must never be scan inputs: they embed
+    // every other host string, so including them makes the ledger depend on
+    // filesystem timing across build steps instead of actual sources.
+    if (relativePath === 'api/_inventory-facts.generated.js') continue;
     const source = read(rootDir, relativePath);
     const lineStarts = [0];
     for (let offset = source.indexOf('\n'); offset !== -1; offset = source.indexOf('\n', offset + 1)) {
