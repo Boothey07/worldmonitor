@@ -2687,7 +2687,7 @@ export class PanelLayoutManager implements AppModule {
 
     // Always create Pro and MCP add-panel blocks — show/hide reactively via auth state.
     const proBlock = document.createElement('button');
-    proBlock.className = 'add-panel-block ai-widget-block ai-widget-block-pro';
+    proBlock.className = 'add-panel-block ai-widget-block';
     proBlock.dataset.clsMover = 'pro-widget-cta';
     proBlock.setAttribute('aria-label', t('widgets.createInteractive'));
     const proIcon = document.createElement('span');

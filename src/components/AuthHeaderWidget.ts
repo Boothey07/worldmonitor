@@ -1,24 +1,21 @@
 import { subscribeAuthState, type AuthSession } from '@/services/auth-state';
-import { mountUserButton, openSignIn, openSignUp } from '@/services/clerk';
-import { t } from '@/services/i18n';
+import { mountUserButton } from '@/services/clerk';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 
 export class AuthHeaderWidget {
   private container: HTMLElement;
   private unsubscribeAuth: (() => void) | null = null;
   private unmountUserButton: (() => void) | null = null;
-  private onSignInClick?: () => void;
+
   private onSettingsClick?: () => void;
-  private onBillingClick?: () => void;
+
 
   constructor(
-    onSignInClick?: () => void,
+    _onSignInClick?: () => void,
     onSettingsClick?: () => void,
-    onBillingClick?: () => void,
+    _onBillingClick?: () => void,
   ) {
-    this.onSignInClick = onSignInClick;
     this.onSettingsClick = onSettingsClick;
-    this.onBillingClick = onBillingClick;
     this.container = document.createElement('div');
     this.container.className = 'auth-header-widget';
 
@@ -44,17 +41,14 @@ export class AuthHeaderWidget {
     }
   }
 
-  private render(state: AuthSession): void {
+  private render(_state: AuthSession): void {
     this.unmountUserButton?.();
     this.unmountUserButton = null;
     this.container.classList.remove('auth-header-widget-pending');
     this.container.removeAttribute('aria-busy');
     setTrustedHtml(this.container, trustedHtml('', 'legacy direct innerHTML migration'));
 
-    if (!state.user) {
-      this.renderSignedOut();
-      return;
-    }
+    // Self-host: always render signed-in (no sign-in flows exist)
     this.renderSignedIn();
   }
 
@@ -76,29 +70,13 @@ export class AuthHeaderWidget {
     this.container.appendChild(signUpSkeleton);
   }
 
-  private renderSignedOut(): void {
-    const signInBtn = document.createElement('button');
-    signInBtn.className = 'auth-signin-btn';
-    signInBtn.textContent = t('auth.signIn');
-    signInBtn.addEventListener('click', () => {
-      if (this.onSignInClick) this.onSignInClick();
-      else openSignIn();
-    });
-    this.container.appendChild(signInBtn);
-
-    const signUpLink = document.createElement('button');
-    signUpLink.className = 'auth-signup-link';
-    signUpLink.textContent = t('auth.createAccount');
-    signUpLink.addEventListener('click', () => openSignUp());
-    this.container.appendChild(signUpLink);
-  }
 
   private renderSignedIn(): void {
     const userBtnEl = document.createElement('div');
     userBtnEl.className = 'auth-clerk-user-button';
     this.container.appendChild(userBtnEl);
     this.unmountUserButton = mountUserButton(userBtnEl, {
-      onBillingClick: this.onBillingClick,
+
       onSettingsClick: this.onSettingsClick,
     });
   }

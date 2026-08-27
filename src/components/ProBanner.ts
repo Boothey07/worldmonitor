@@ -238,7 +238,7 @@ export function showProBanner(container: HTMLElement): void {
   const decision = decideProBannerMount({
     inIframe: window.self !== window.top,
     dismissed: isDismissed(),
-    hasPremiumAccess: premium,
+    hasPremiumAccess: true, // Self-host: never show the upsell
     premiumHint: readPremiumHint(),
     authPending: auth.isPending,
     clerkConfigured: isClerkAuthEnabled(),
