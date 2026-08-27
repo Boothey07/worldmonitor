@@ -440,6 +440,7 @@ export const PUBLIC_NO_AUTH_RPC_PATHS = new Set<string>([
   '/api/intelligence/v1/get-risk-scores',
   '/api/supply-chain/v1/get-chokepoint-status',
   '/api/intelligence/v1/list-security-advisories',
+  '/api/military/v1/list-military-flights',
   '/api/infrastructure/v1/list-internet-outages',
   '/api/maritime/v1/get-vessel-snapshot',
   '/api/sanctions/v1/list-sanctions-pressure',
